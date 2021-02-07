@@ -1,0 +1,22 @@
+[package]
+name = "ubgpd"
+version = "0.1.0"
+authors = ["Eric Lauriault <eric.lauriault@protonmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.6.2", features = ["codec"]}
+tokio-stream = "0.1"
+tokio-io = "0.1"
+bytes = "1"
+num-traits = "0.2"
+num-derive = "0.2"
+derive_builder = "0.9.0"
+byteorder = "1.4.2"
+async-std = "1"
+futures = "0.3"
+structopt = { version = "0.3" }
