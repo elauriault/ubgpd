@@ -110,37 +110,44 @@ impl BGPNeighbor {
 
         let na = n.clone();
         let ta = tx.clone();
-        tokio::spawn(async move {
-            loop {
-                let s;
-                {
-                    s = na.lock().await.attributes.hold_time;
-                }
-                println!("Sleeping for {} seconds", s as u64 / 3);
-                sleep(Duration::from_secs(s as u64 / 3)).await;
-                ta.send(Event::SendKeepalive).await.unwrap();
-            }
+        tokio::spawn(async {
+            BGPNeighbor::timer_hold(na, ta).await;
         });
-
-        let nb = n.clone();
-        let tb = tx.clone();
 
         loop {
             tokio::select! {
-                Some(m) = BGPNeighbor::read_message(&mut server) =>
-                    {
-                        BGPNeighbor::process_message(m,nb.clone(),tb.clone()).await;
-                    }
-                Some(res) = rx.recv() => {
-                    match res {
-                        Event::SendKeepalive => {
-                            let _ = BGPNeighbor::send_keepalive(&mut server).await.unwrap();
-                        }
-                        _ => {
-                            println!("{:?}",res);
-                        }
-                    }
+                Some(m) = BGPNeighbor::read_message(&mut server) => {
+                        BGPNeighbor::process_message(m,n.clone(),tx.clone()).await;
                 }
+                Some(e) = rx.recv() => {
+                    BGPNeighbor::process_event(e,&mut server).await;
+                }
+            }
+        }
+    }
+
+    async fn timer_hold(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>) {
+        loop {
+            let s;
+            {
+                s = n.lock().await.attributes.hold_time;
+            }
+            println!("Sleeping for {} seconds", s as u64 / 3);
+            sleep(Duration::from_secs(s as u64 / 3)).await;
+            tx.send(Event::SendKeepalive).await.unwrap();
+        }
+    }
+
+    async fn process_event(
+        e: Event,
+        server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
+    ) {
+        match e {
+            Event::SendKeepalive => {
+                let _ = BGPNeighbor::send_keepalive(server).await.unwrap();
+            }
+            _ => {
+                println!("{:?}", e);
             }
         }
     }
