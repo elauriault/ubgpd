@@ -80,6 +80,7 @@ pub struct BGPSessionAttributes {
 enum Event {
     // HoldTimerExpired,
     SendKeepalive,
+    KeepaliveExpired,
     ReceivedOpen,
     ReceivedKeepalive,
     ReceivedUpdate,
@@ -138,6 +139,25 @@ impl BGPNeighbor {
         }
     }
 
+    async fn timer_keepalive(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>) {
+        println!("Starting keepalive timer");
+        loop {
+            sleep(Duration::from_secs(1)).await;
+            let k;
+            let h;
+            {
+                let mut n = n.lock().await;
+                n.attributes.keepalive_timer += 1;
+                k = n.attributes.keepalive_timer;
+                h = n.attributes.hold_time as usize;
+            }
+            println!("Keepalive incremented");
+            if k > h {
+                tx.send(Event::KeepaliveExpired).await.unwrap()
+            }
+        }
+    }
+
     async fn process_event(
         e: Event,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
@@ -159,6 +179,11 @@ impl BGPNeighbor {
     ) {
         match m.header.message_type {
             bgp::MessageType::KEEPALIVE => {
+                {
+                    let mut n = nb.lock().await;
+                    n.attributes.keepalive_timer = 0;
+                    println!("Keepalive reset");
+                }
                 tb.send(Event::ReceivedKeepalive).await.unwrap();
             }
             bgp::MessageType::OPEN => {
@@ -171,6 +196,11 @@ impl BGPNeighbor {
                     n.remote_asn = o.local_asn;
                     println!("Neighbor updated : {:?}", n);
                 }
+                let na = nb.clone();
+                let ta = tb.clone();
+                tokio::spawn(async {
+                    BGPNeighbor::timer_keepalive(na, ta).await;
+                });
                 tb.send(Event::ReceivedOpen).await.unwrap();
             }
             bgp::MessageType::NOTIFICATION => {
