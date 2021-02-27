@@ -118,7 +118,7 @@ impl BGPNeighbor {
         loop {
             tokio::select! {
                 Some(m) = BGPNeighbor::read_message(&mut server) => {
-                        BGPNeighbor::process_message(m,n.clone(),tx.clone()).await;
+                    BGPNeighbor::process_message(m,n.clone(),tx.clone()).await;
                 }
                 Some(e) = rx.recv() => {
                     BGPNeighbor::process_event(e,&mut server).await;
@@ -177,8 +177,8 @@ impl BGPNeighbor {
         nb: Arc<Mutex<BGPNeighbor>>,
         tb: mpsc::Sender<Event>,
     ) {
-        match m.header.message_type {
-            bgp::MessageType::KEEPALIVE => {
+        match m.body {
+            bgp::BGPMessageBody::Keepalive(body) => {
                 {
                     let mut n = nb.lock().await;
                     n.attributes.keepalive_timer = 0;
@@ -186,14 +186,13 @@ impl BGPNeighbor {
                 }
                 tb.send(Event::ReceivedKeepalive).await.unwrap();
             }
-            bgp::MessageType::OPEN => {
-                let o: bgp::BGPOpenMessage = bgp::BGPOpenMessage::from(m.body);
-                println!("{}", o);
+            bgp::BGPMessageBody::Open(body) => {
+                println!("{}", body);
                 {
                     let mut n = nb.lock().await;
-                    n.attributes.hold_time = o.hold_time;
-                    n.router_id = o.router_id;
-                    n.remote_asn = o.local_asn;
+                    n.attributes.hold_time = body.hold_time;
+                    n.router_id = body.router_id;
+                    n.remote_asn = body.local_asn;
                     println!("Neighbor updated : {:?}", n);
                 }
                 let na = nb.clone();
@@ -203,10 +202,10 @@ impl BGPNeighbor {
                 });
                 tb.send(Event::ReceivedOpen).await.unwrap();
             }
-            bgp::MessageType::NOTIFICATION => {
+            bgp::BGPMessageBody::Notification(body) => {
                 tb.send(Event::ReceivedNotification).await.unwrap();
             }
-            bgp::MessageType::UPDATE => {
+            bgp::BGPMessageBody::Update(body) => {
                 tb.send(Event::ReceivedUpdate).await.unwrap();
             }
         };
@@ -217,38 +216,45 @@ impl BGPNeighbor {
         asn: u16,
         rid: u32,
         hold: u16,
-    ) -> Result<bgp::Message, Box<dyn Error>> {
-        let body: Vec<u8> = bgp::BGPOpenMessage::new(asn, rid, hold).unwrap().into();
+    ) -> Result<(), Box<dyn Error>> {
+        let body = bgp::BGPOpenMessage::new(asn, rid, hold).unwrap();
         println!("open :{:?}", body);
-        let message: Vec<u8> = bgp::Message::new(bgp::MessageType::OPEN, body)
-            .unwrap()
-            .into();
+        let message: Vec<u8> =
+            bgp::Message::new(bgp::MessageType::OPEN, bgp::BGPMessageBody::Open(body))
+                .unwrap()
+                .into();
         println!("message :{:?}", message);
         let r = server.send(message).await;
         match r {
-            Ok(_) => Ok(bgp::Message::new(bgp::MessageType::KEEPALIVE, vec![]).unwrap()),
+            Ok(_) => Ok(()),
             Err(e) => {
                 println!("{:?}", e);
-                Ok(bgp::Message::new(bgp::MessageType::KEEPALIVE, vec![]).unwrap())
+                // Ok(())
+                Err(Box::new(e))
             }
         }
     }
 
     async fn send_keepalive(
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-    ) -> Result<bgp::Message, Box<dyn Error>> {
-        let body: Vec<u8> = bgp::BGPKeepaliveMessage::new().unwrap().into();
+    ) -> Result<(), Box<dyn Error>> {
+        let body = bgp::BGPKeepaliveMessage::new().unwrap();
         // println!("keepalive :{:?}", body);
-        let message: Vec<u8> = bgp::Message::new(bgp::MessageType::KEEPALIVE, body)
-            .unwrap()
-            .into();
+        let message: Vec<u8> = bgp::Message::new(
+            bgp::MessageType::KEEPALIVE,
+            bgp::BGPMessageBody::Keepalive(body),
+        )
+        .unwrap()
+        .into();
         println!("Sending keepalive");
         let r = server.send(message).await;
         match r {
-            Ok(_) => Ok(bgp::Message::new(bgp::MessageType::KEEPALIVE, vec![]).unwrap()),
+            Ok(_) => Ok(()),
             Err(e) => {
                 println!("{:?}", e);
-                Ok(bgp::Message::new(bgp::MessageType::KEEPALIVE, vec![]).unwrap())
+                // Err(e)
+                Err(Box::new(e))
+                // Ok(())
             }
         }
     }
@@ -260,14 +266,9 @@ impl BGPNeighbor {
         match message {
             Some(bytes) => {
                 let bytes: bgp::Message = bgp::Message::from(bytes.unwrap());
-                // println!("Message received : {:?}", bytes.header.message_type);
                 Some(bytes)
             }
-            None => {
-                None
-                // println!("Empty");
-                // Ok(bgp::Message::new(bgp::MessageType::KEEPALIVE, vec![]).unwrap())
-            }
+            None => None,
         }
     }
 }

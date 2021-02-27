@@ -1,14 +1,17 @@
 #![allow(dead_code)]
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::{Buf, BytesMut};
+use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use std::convert::{TryFrom, TryInto};
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
 use std::net::Ipv4Addr;
 use std::result::Result;
 use std::{error::Error, fmt};
+use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tokio_util::codec::{Decoder, Encoder};
@@ -28,6 +31,27 @@ impl fmt::Display for MissingMarker {
 
 impl Error for MissingMarker {}
 
+#[derive(Error, Debug)]
+pub enum BGPError {
+    #[error("Builder could not complete")]
+    BuilderError,
+
+    #[error("Parameter could not be parsed from bgp message")]
+    ParameterParsingError,
+    /// Represents an empty source. For example, an empty text file being given
+    /// as input to `count_words()`.
+    #[error("Source contains no data")]
+    EmptySource,
+
+    /// Represents a failure to read from input.
+    #[error("Codec error")]
+    CodecError { source: std::io::Error },
+
+    /// Represents all other cases of `std::io::Error`.
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+}
+
 #[derive(Debug, Clone, FromPrimitive, PartialEq)]
 #[repr(u8)]
 pub enum MessageType {
@@ -43,18 +67,18 @@ impl Default for MessageType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
-enum ErrorCode {
-    MessageHeader = 1,
-    OpenMessage = 2,
-    UpdateMessage = 3,
-    HoldTimerExpired = 4,
-    FSMError = 5,
-    Cease = 6,
+pub enum ErrorCode {
+    MessageHeader,
+    OpenMessage,
+    UpdateMessage,
+    HoldTimerExpired,
+    FSMError,
+    Cease,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(u8)]
 enum HeaderSubCode {
     ConnectionNotSynchronized = 1,
@@ -62,7 +86,7 @@ enum HeaderSubCode {
     BadMessageType = 3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(u8)]
 enum OpenSubCode {
     UnsupportedVersionNumber = 1,
@@ -73,7 +97,7 @@ enum OpenSubCode {
     UnacceptableHoldTime = 6,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(u8)]
 enum UpdateSubCode {
     MalformedAttributeList = 1,
@@ -96,7 +120,7 @@ pub struct BGPMessageHeader {
     pub message_type: MessageType,
 }
 
-#[derive(Default, Builder, Debug)]
+#[derive(Default, Builder, Debug, Clone)]
 #[builder(setter(into))]
 pub struct BGPOpenMessage {
     version: u8,
@@ -173,20 +197,15 @@ impl BGPOpenMessage {
         self.opt_params.len() + 10 * size_of::<u16>()
     }
 
-    pub fn new(
-        asn: u16,
-        rid: u32,
-        hold: u16,
-    ) -> Result<BGPOpenMessage, Box<dyn Error + Sync + Send>> {
+    pub fn new(asn: u16, rid: u32, hold: u16) -> Result<BGPOpenMessage, String> {
         let opt: Vec<u8> = BGPOptionalParameter::default().into();
-        let open_body = BGPOpenMessageBuilder::default()
+        BGPOpenMessageBuilder::default()
             .version(VERSION)
             .local_asn(asn)
             .hold_time(hold)
             .router_id(rid)
             .opt_params(opt)
-            .build()?;
-        Ok(open_body)
+            .build()
     }
 }
 
@@ -294,14 +313,14 @@ impl Into<Vec<u8>> for BGPMultiprotocolCapability {
     }
 }
 
-#[derive(Default, Builder, Debug)]
+#[derive(Default, Builder, Debug, Clone, PartialEq)]
 #[builder(setter(into))]
-struct BGPUpdateMessage {
+pub struct BGPUpdateMessage {
     // withdrawn_route_length: u16,
-    withdrawn_routes: Vec<u8>,
+    withdrawn_routes: Vec<NLRI>,
     // path_attribute_length: u16,
-    path_attributes: Vec<u8>,
-    nlri: Vec<u8>,
+    path_attributes: Vec<PathAttribute>,
+    nlri: Vec<NLRI>,
 }
 
 impl BGPUpdateMessage {
@@ -312,28 +331,382 @@ impl BGPUpdateMessage {
             + 2 * size_of::<u16>()
     }
 
-    pub fn new() -> Result<BGPUpdateMessage, Box<dyn Error + Sync + Send>> {
-        Ok(BGPUpdateMessageBuilder::default().build()?)
+    pub fn new() -> Result<BGPUpdateMessage, String> {
+        BGPUpdateMessageBuilder::default().build()
     }
 }
 
 impl Into<Vec<u8>> for BGPUpdateMessage {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
-        buf.write_u16::<BigEndian>(self.withdrawn_routes.len() as u16)
-            .unwrap();
-        buf.write(&self.withdrawn_routes).unwrap();
-        buf.write_u16::<BigEndian>(self.path_attributes.len() as u16)
-            .unwrap();
-        buf.write(&self.path_attributes).unwrap();
-        buf.write(&self.nlri).unwrap();
+
+        let mut wd: Vec<u8> = vec![];
+        for w in self.withdrawn_routes {
+            let mut v: Vec<u8> = w.into();
+            wd.append(&mut v);
+        }
+        buf.write_u16::<BigEndian>(wd.len() as u16).unwrap();
+        buf.write(&wd).unwrap();
+
+        let mut pa: Vec<u8> = vec![];
+        for a in self.path_attributes {
+            let mut v: Vec<u8> = a.into();
+            pa.append(&mut v);
+        }
+        buf.write_u16::<BigEndian>(pa.len() as u16).unwrap();
+        buf.write(&pa).unwrap();
+
+        let mut nl: Vec<u8> = vec![];
+        for w in self.nlri {
+            let mut v: Vec<u8> = w.into();
+            nl.append(&mut v);
+        }
+        buf.write(&nl).unwrap();
+        buf.into_inner()
+    }
+}
+impl From<Vec<u8>> for BGPUpdateMessage {
+    fn from(src: Vec<u8>) -> Self {
+        let mut wdl = [0u8; 2];
+        wdl.copy_from_slice(&src[0..2]);
+        let wdl = u16::from_be_bytes(wdl) as usize;
+
+        // println!("wdl is {}", wdl);
+
+        let mut wd: Vec<NLRI> = vec![];
+        let mut used = 0;
+        let mut i = 2;
+
+        while wdl > used {
+            let n: NLRI = src[i..i + 4].to_vec().into();
+            // println!("WD : {:?}", n);
+            wd.push(n.clone());
+            let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+            used += blen;
+            i += blen;
+        }
+
+        let mut atl = [0u8; 2];
+        atl.copy_from_slice(&src[i..i + 2]);
+        let atl = u16::from_be_bytes(atl) as usize;
+        // println!("atl is {}", atl);
+
+        i += 2;
+
+        // println!("i is {}", i);
+
+        let mut pa: Vec<PathAttribute> = vec![];
+        let mut used = 0;
+        while atl > used {
+            let atn = src[i + 2] as usize;
+            let n: PathAttribute = src[i..i + 3 + atn].to_vec().into();
+            // println!("PathAttribute : {:?}", n);
+            pa.push(n);
+            used += 3 + atn;
+            i += 3 + atn;
+        }
+
+        let total_len = src.len();
+
+        let mut routes: Vec<NLRI> = vec![];
+        while i < total_len {
+            // println!("i : {:?}", i);
+            let n: NLRI = src[i..].to_vec().into();
+            // println!("NLRI : {:?}", n);
+            routes.push(n.clone());
+            let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+            i += blen;
+        }
+
+        BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(wd)
+            .path_attributes(pa)
+            .nlri(routes)
+            .build()
+            .unwrap()
+    }
+}
+#[derive(Builder, Debug, PartialEq, Clone)]
+#[builder(setter(into))]
+pub struct PathAttribute {
+    optional: bool,
+    transitive: bool,
+    partial: bool,
+    extended_length: bool,
+    // type_code: PathAttributeType,
+    value: PathAttributeValue,
+}
+
+impl From<Vec<u8>> for PathAttribute {
+    fn from(src: Vec<u8>) -> Self {
+        let mask = src[0];
+
+        // println!("mask is {:#x}", mask);
+
+        let mask = mask >> 4;
+        let extended_length: bool = match mask & 0b0001 {
+            0 => false,
+            _ => true,
+        };
+
+        let partial: bool = match mask & 0b0010 {
+            0 => false,
+            _ => true,
+        };
+
+        let transitive: bool = match mask & 0b0100 {
+            0 => false,
+            _ => true,
+        };
+
+        let optional: bool = match mask & 0b1000 {
+            0 => false,
+            _ => true,
+        };
+
+        let type_code: PathAttributeType = FromPrimitive::from_u8(src[1]).unwrap();
+
+        // println!("type_code is {:#x}, {:?}", src[1], type_code);
+
+        let value = match type_code {
+            PathAttributeType::Origin => {
+                PathAttributeValue::Origin(FromPrimitive::from_u8(src[3]).unwrap())
+            }
+            PathAttributeType::AsPath => {
+                let mut total_len = src[2] as usize;
+                let mut asp: ASPATH = vec![];
+                let i = 3;
+                let mut offset = 0;
+
+                while total_len > 0 {
+                    let path_type: ASPATHSegmentType =
+                        FromPrimitive::from_u8(src[i + offset]).unwrap();
+                    let as_list_len = src[i + offset + 1] as usize;
+                    let mut as_list = Box::<Vec<u16>>::new(vec![]);
+
+                    for x in 0..as_list_len {
+                        let j = i + offset + 2 + x * 2;
+                        let mut asn = [0u8; 2];
+                        asn.copy_from_slice(&src[j..j + 2]);
+                        let asn = u16::from_be_bytes(asn);
+                        as_list.push(asn);
+                    }
+
+                    let as_list = Box::leak(as_list).to_vec();
+                    let asg = ASPATHSegment { path_type, as_list };
+
+                    asp.push(asg);
+
+                    total_len -= 2 + 2 * as_list_len;
+                    offset += 2 + 2 * as_list_len;
+                }
+
+                PathAttributeValue::AsPath(asp)
+            }
+            PathAttributeType::NextHop => {
+                PathAttributeValue::NextHop(Ipv4Addr::new(src[3], src[4], src[5], src[6]))
+            }
+            PathAttributeType::MultiExitDisc => {
+                let mut med = [0u8; 4];
+                med.copy_from_slice(&src[3..7]);
+                let med = u32::from_be_bytes(med);
+                PathAttributeValue::MultiExitDisc(med)
+            }
+            PathAttributeType::LocalPref => {
+                let mut lp = [0u8; 4];
+                lp.copy_from_slice(&src[3..7]);
+                let lp = u32::from_be_bytes(lp);
+                PathAttributeValue::LocalPref(lp)
+            }
+            PathAttributeType::AtomicAggregate => PathAttributeValue::AtomicAggregate,
+            PathAttributeType::Aggregator => {
+                let mut asn = [0u8; 2];
+                asn.copy_from_slice(&src[3..5]);
+                let asn = u16::from_be_bytes(asn);
+                let ag = AggregatorValue {
+                    last_as: asn,
+                    aggregator: Ipv4Addr::new(src[5], src[6], src[7], src[8]),
+                };
+                PathAttributeValue::Aggregator(ag)
+            }
+        };
+
+        PathAttribute {
+            optional,
+            transitive,
+            partial,
+            extended_length,
+            value,
+        }
+    }
+}
+
+impl Into<Vec<u8>> for PathAttribute {
+    fn into(self) -> Vec<u8> {
+        let mut buf: Vec<u8> = vec![];
+
+        let mut mask: u8 = 0;
+
+        if self.extended_length {
+            mask += 1;
+        }
+        if self.partial {
+            mask += 2;
+        }
+        if self.transitive {
+            mask += 4;
+        }
+        if self.optional {
+            mask += 8;
+        }
+
+        buf.push(mask);
+        buf.push(0x0);
+        let code: u8;
+        let mut val = Cursor::new(vec![]);
+
+        match self.value {
+            PathAttributeValue::Origin(value) => {
+                code = 1;
+                val.write_u8(value as u8).unwrap();
+            }
+            PathAttributeValue::AsPath(value) => {
+                code = 2;
+                for i in value {
+                    let v: Vec<u8> = i.into();
+                    val.write(&v).unwrap();
+                }
+            }
+            PathAttributeValue::NextHop(value) => {
+                code = 3;
+                val.write_u32::<BigEndian>(value.into()).unwrap();
+            }
+            PathAttributeValue::MultiExitDisc(value) => {
+                code = 4;
+                val.write_u32::<BigEndian>(value).unwrap();
+            }
+            PathAttributeValue::LocalPref(value) => {
+                code = 5;
+                val.write_u32::<BigEndian>(value).unwrap();
+            }
+            PathAttributeValue::AtomicAggregate => {
+                code = 6;
+            }
+            PathAttributeValue::Aggregator(value) => {
+                code = 7;
+                val.write_u16::<BigEndian>(value.last_as).unwrap();
+                val.write_u32::<BigEndian>(value.aggregator.into()).unwrap();
+            }
+        }
+        buf.push(code);
+        let mut val = val.into_inner();
+        let len = val.len() as u8;
+        buf.push(len);
+        buf.append(&mut val);
+        buf
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, FromPrimitive, Copy)]
+enum PathAttributeType {
+    Origin = 1,
+    AsPath,
+    NextHop,
+    MultiExitDisc,
+    LocalPref,
+    AtomicAggregate,
+    Aggregator,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PathAttributeValue {
+    Origin(OriginType),
+    AsPath(ASPATH),
+    NextHop(Ipv4Addr),
+    MultiExitDisc(u32),
+    LocalPref(u32),
+    AtomicAggregate,
+    Aggregator(AggregatorValue),
+}
+
+#[derive(Debug, PartialEq, Clone, FromPrimitive)]
+pub enum OriginType {
+    IGP = 0,
+    EGP,
+    INCOMPLETE,
+}
+
+#[derive(Debug, PartialEq, Clone, FromPrimitive)]
+enum ASPATHSegmentType {
+    AsSet = 1,
+    AsSequence,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ASPATHSegment {
+    path_type: ASPATHSegmentType,
+    // as_list_len: u8,
+    as_list: Vec<u16>,
+}
+
+impl Into<Vec<u8>> for ASPATHSegment {
+    fn into(self) -> Vec<u8> {
+        let mut v: Vec<u8> = vec![];
+        v.push(self.path_type as u8);
+        v.push(self.as_list.len() as u8);
+        let mut buf = Cursor::new(vec![]);
+        for asn in self.as_list {
+            buf.write_u16::<BigEndian>(asn).unwrap();
+        }
+        let mut buf = buf.into_inner();
+        v.append(&mut buf);
+        v
+    }
+}
+
+pub type ASPATH = Vec<ASPATHSegment>;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct AggregatorValue {
+    last_as: u16,
+    aggregator: Ipv4Addr,
+}
+
+#[derive(Builder, Debug, Clone, PartialEq)]
+#[builder(setter(into))]
+pub struct NLRI {
+    net: Ipv4Net,
+}
+
+impl Into<Vec<u8>> for NLRI {
+    fn into(self) -> Vec<u8> {
+        let mut buf = Cursor::new(vec![]);
+        buf.write_u8(self.net.prefix_len()).unwrap();
+        let addr: u32 = self.net.network().into();
+        let addr = addr.to_be_bytes();
+        let blen = (self.net.prefix_len() as f32 / 8.0).ceil() as usize;
+        buf.write(&addr[0..blen]).unwrap();
         buf.into_inner()
     }
 }
 
-#[derive(Builder, Debug)]
+impl From<Vec<u8>> for NLRI {
+    fn from(src: Vec<u8>) -> Self {
+        let mut addr = src;
+        let plen = addr.remove(0);
+        // println!("plen {:?}", plen);
+        let blen = (plen as f32 / 8.0).ceil() as usize;
+        // println!("blen {:?}", blen);
+        let mut t: Vec<u8> = vec![0; 4 - blen];
+        addr.append(&mut t);
+        let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen).unwrap();
+        NLRIBuilder::default().net(net).build().unwrap()
+    }
+}
+
+#[derive(Builder, Debug, Clone)]
 #[builder(setter(into))]
-struct BGPNotificationMessage {
+pub struct BGPNotificationMessage {
     error_code: ErrorCode,
     error_subcode: u8,
     data: Vec<u8>,
@@ -344,14 +717,21 @@ impl BGPNotificationMessage {
         2 + self.data.len()
     }
 
-    pub fn new(
-        code: ErrorCode,
-        sub: usize,
-    ) -> Result<BGPNotificationMessage, Box<dyn Error + Sync + Send>> {
-        Ok(BGPNotificationMessageBuilder::default()
+    pub fn new(code: ErrorCode, sub: usize) -> Result<BGPNotificationMessage, String> {
+        BGPNotificationMessageBuilder::default()
             .error_code(code)
             .error_subcode(sub as u8)
-            .build()?)
+            .build()
+    }
+}
+impl From<Vec<u8>> for BGPNotificationMessage {
+    fn from(src: Vec<u8>) -> Self {
+        let e: ErrorCode = FromPrimitive::from_u8(src[0]).unwrap();
+        BGPNotificationMessageBuilder::default()
+            .error_code(e)
+            .error_subcode(src[1])
+            .build()
+            .unwrap()
     }
 }
 
@@ -365,7 +745,7 @@ impl Into<Vec<u8>> for BGPNotificationMessage {
     }
 }
 
-#[derive(Default, Builder, Debug)]
+#[derive(Default, Builder, Debug, Clone)]
 #[builder(setter(into))]
 pub struct BGPKeepaliveMessage {}
 
@@ -374,8 +754,8 @@ impl BGPKeepaliveMessage {
         0
     }
 
-    pub fn new() -> Result<BGPKeepaliveMessage, Box<dyn Error + Sync + Send>> {
-        Ok(BGPKeepaliveMessageBuilder::default().build()?)
+    pub fn new() -> std::result::Result<BGPKeepaliveMessage, String> {
+        BGPKeepaliveMessageBuilder::default().build()
     }
 }
 
@@ -446,27 +826,73 @@ impl Encoder<Vec<u8>> for BGPMessageCodec {
     }
 }
 
-#[derive(Default, Builder, Debug, PartialEq)]
+#[derive(Debug, Clone)]
+pub enum BGPMessageBody {
+    Open(BGPOpenMessage),
+    Update(BGPUpdateMessage),
+    Notification(BGPNotificationMessage),
+    Keepalive(BGPKeepaliveMessage),
+}
+
+impl Default for BGPMessageBody {
+    fn default() -> Self {
+        let msg = BGPKeepaliveMessage::new().unwrap();
+        Self::Keepalive(msg)
+    }
+}
+impl Into<Vec<u8>> for BGPMessageBody {
+    fn into(self) -> Vec<u8> {
+        match self {
+            Self::Open(body) => body.into(),
+            Self::Update(body) => body.into(),
+            Self::Notification(body) => body.into(),
+            Self::Keepalive(body) => body.into(),
+        }
+    }
+}
+
+#[derive(Default, Builder, Debug)]
 #[builder(setter(into))]
 pub struct Message {
     pub header: BGPMessageHeader,
-    pub body: Vec<u8>,
+    pub body: BGPMessageBody,
 }
 
 impl From<Vec<u8>> for Message {
     fn from(src: Vec<u8>) -> Self {
         let mut mtype = [0u8; 1];
         mtype.copy_from_slice(&src[18..19]);
+        let mtype = MessageType::from_u8(mtype[0]).unwrap();
         let header = BGPMessageHeaderBuilder::default()
-            .message_type(MessageType::from_u8(mtype[0]).unwrap())
+            .message_type(mtype.clone())
             .build()
             .unwrap();
         let mut length_bytes = [0u8; 2];
         length_bytes.copy_from_slice(&src[16..18]);
         let srclength = src.len();
+        let v = src[19..srclength].to_vec();
+        let body = match mtype {
+            MessageType::OPEN => {
+                let msg: BGPOpenMessage = v.into();
+                BGPMessageBody::Open(msg)
+            }
+            MessageType::UPDATE => {
+                let msg: BGPUpdateMessage = v.into();
+                BGPMessageBody::Update(msg)
+            }
+            MessageType::NOTIFICATION => {
+                let msg: BGPNotificationMessage = v.into();
+                BGPMessageBody::Notification(msg)
+            }
+            MessageType::KEEPALIVE => {
+                let msg = BGPKeepaliveMessage::new().unwrap();
+                BGPMessageBody::Keepalive(msg)
+            }
+        };
+
         MessageBuilder::default()
             .header(header)
-            .body(src[19..srclength].to_vec())
+            .body(body)
             .build()
             .unwrap()
     }
@@ -482,13 +908,18 @@ impl Into<Vec<u8>> for Message {
         // buf.write_u16::<BigEndian>(len).unwrap();
         buf.write_u8(self.header.message_type.clone() as u8)
             .unwrap();
-        buf.write(&self.body).unwrap();
+
+        let v: Vec<u8> = self.body.into();
+        buf.write(&v[0..]).unwrap();
         buf.into_inner()
     }
 }
 
 impl Message {
-    pub fn new(mtype: MessageType, body: Vec<u8>) -> Result<Message, Box<dyn Error + Sync + Send>> {
+    pub fn new(
+        mtype: MessageType,
+        body: BGPMessageBody,
+    ) -> Result<Message, Box<dyn Error + Sync + Send>> {
         let header = BGPMessageHeaderBuilder::default()
             .message_type(mtype.clone())
             .build()?;
@@ -510,16 +941,137 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_u8_to_update() {
+        let v: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x14, 0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x06, 0x02, 0x02, 0xfe,
+            0xb0, 0xfe, 0x4c, 0x40, 0x03, 0x04, 0x02, 0x02, 0x02, 0x02, 0x18, 0x0a, 0x0a, 0x01,
+            0x18, 0x0a, 0x0a, 0x02, 0x18, 0x0a, 0x0a, 0x03,
+        ];
+        let u: BGPUpdateMessage = v.into();
+        // let w: BGPUpdateMessage = {
+        //         withdrawn_routes: NLRi =[],
+        //     path_attributes: [
+        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: Origin(IGP) },
+        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: AsPath([ASPATHSegment { path_type: AsSequence, as_list: [65200, 65100] }]) },
+        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: NextHop(2.2.2.2) }
+        //     ],
+        //     nlri: [
+        //         NLRI { net: 10.10.1.24/24 },
+        //         NLRI { net: 10.10.2.24/24 },
+        //         NLRI { net: 10.10.3.0/24 }
+        // };
+        let w = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(vec![])
+            .nlri(vec![])
+            .build()
+            .unwrap();
+        assert_eq!(u, w);
+    }
+
+    #[test]
+    fn test_u8_to_update_med() {
+        let v: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x19, 0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x04, 0x02, 0x01, 0x00,
+            0xc8, 0x40, 0x03, 0x04, 0x0a, 0x01, 0x0c, 0x02, 0x80, 0x04, 0x04, 0x00, 0x00, 0x00,
+            0xf2, 0x08, 0x02,
+        ];
+        let u: BGPUpdateMessage = v.into();
+        let w = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(vec![])
+            .nlri(vec![])
+            .build()
+            .unwrap();
+        assert_eq!(u, w);
+    }
+
+    #[test]
+    fn test_u8_to_update_asset() {
+        let v: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x28, 0x40, 0x01, 0x01, 0x02, 0x40, 0x02, 0x0a, 0x02, 0x01, 0x00,
+            0x1e, 0x01, 0x02, 0x00, 0x0a, 0x00, 0x14, 0x40, 0x03, 0x04, 0x0a, 0x00, 0x00, 0x09,
+            0x80, 0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x07, 0x06, 0x00, 0x1e, 0x0a, 0x00,
+            0x00, 0x09, 0x15, 0xac, 0x10, 0x00,
+        ];
+        let u: BGPUpdateMessage = v.into();
+        let w = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(vec![])
+            .nlri(vec![])
+            .build()
+            .unwrap();
+        assert_eq!(u, w);
+    }
+
+    #[test]
+    fn test_u8_to_nlri1() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![24, 192, 168, 1];
+        let u: NLRI = v.into();
+
+        assert_eq!(n, u);
+    }
+
+    #[test]
+    fn test_u8_to_nlri2() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![32, 192, 168, 1, 1];
+        let u: NLRI = v.into();
+
+        assert_eq!(n, u);
+    }
+
+    #[test]
+    fn test_u8_to_nlri3() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![25, 192, 168, 1, 128];
+        let u: NLRI = v.into();
+
+        assert_eq!(n, u);
+    }
+
+    #[test]
+    fn test_into_nlri_24() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![24, 192, 168, 1];
+        let n1: NLRI = v.into();
+        assert_eq!(n.net, n1.net);
+    }
+
+    #[test]
+    fn test_into_nlri_32() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![32, 192, 168, 1, 1];
+        let n1: NLRI = v.into();
+        assert_eq!(n.net, n1.net);
+    }
+
+    #[test]
+    fn test_into_nlri_25() {
+        let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
+        let n = NLRI { net };
+        let v: Vec<u8> = vec![25, 192, 168, 1, 128];
+        let n1: NLRI = v.into();
+        assert_eq!(n.net, n1.net);
+    }
+
+    #[test]
     fn test_opt_params() {
         let mut plist: Vec<BGPOptionalParameter> = vec![];
         let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability { afi: 1, safi: 1 };
         let pc: BGPCapability = BGPCapability {
             capability_code: BGPCapabilityCode::Multiprotocol,
-            capability_value: cv.into(),
+            capability_value: cv.try_into().unwrap(),
         };
         let p1: BGPOptionalParameter = BGPOptionalParameter {
             param_type: BGPOptionalParameterType::Capability,
-            param_value: pc.into(),
+            param_value: pc.try_into().unwrap(),
         };
 
         plist.push(p1);
@@ -527,7 +1079,7 @@ mod tests {
         let mut v: Vec<u8> = vec![];
 
         for param in plist {
-            let mut p: Vec<u8> = param.into();
+            let mut p: Vec<u8> = param.try_into().unwrap();
             v.append(&mut p);
         }
 
@@ -544,15 +1096,22 @@ mod tests {
 
     #[test]
     fn test_keepalive_message() {
-        let body: Vec<u8> = BGPKeepaliveMessage::new().unwrap().into();
-        let test_msg: Vec<u8> = Message::new(MessageType::KEEPALIVE, body).unwrap().into();
+        let body = BGPKeepaliveMessage::new().unwrap();
+        let test_msg: Vec<u8> =
+            Message::new(MessageType::KEEPALIVE, BGPMessageBody::Keepalive(body))
+                .unwrap()
+                .try_into()
+                .unwrap();
         let keepalive: Vec<u8> = vec![0x4];
         assert_eq!(test_msg, keepalive)
     }
     #[test]
     fn test_open_message() {
-        let body: Vec<u8> = BGPOpenMessage::new(123, 345, 3).unwrap().into();
-        let test_msg: Vec<u8> = Message::new(MessageType::OPEN, body).unwrap().into();
+        let body = BGPOpenMessage::new(123, 345, 3).unwrap();
+        let test_msg: Vec<u8> = Message::new(MessageType::OPEN, BGPMessageBody::Open(body))
+            .unwrap()
+            .try_into()
+            .unwrap();
         let open: Vec<u8> = vec![
             0x1, 0x4, 0x0, 0x7b, 0x0, 0x3, 0x0, 0x0, 0x1, 0x59, 0x8, 0x2, 0x6, 0x1, 0x4, 0x0, 0x1,
             0x0, 0x1,
