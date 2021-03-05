@@ -730,6 +730,7 @@ impl From<Vec<u8>> for BGPNotificationMessage {
         BGPNotificationMessageBuilder::default()
             .error_code(e)
             .error_subcode(src[1])
+            .data(vec![])
             .build()
             .unwrap()
     }
