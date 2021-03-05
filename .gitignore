@@ -1,1 +1,4 @@
 /target
+tags*
+.vim
+rusty-tags*
