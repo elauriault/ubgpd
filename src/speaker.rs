@@ -152,10 +152,11 @@ impl BGPNeighbor {
         let (tx, mut rx) = mpsc::channel::<Event>(100);
 
         // let _ = tx.send(Event::AutomaticStart).await;
+        // let _ = tx.send(Event::TcpConnectionConfirmed).await;
 
         let mut server = Framed::new(s, bgp::BGPMessageCodec);
 
-        let _ = tx.send(Event::TcpConnectionConfirmed).await;
+        // let _ = tx.send(Event::TcpConnectionConfirmed).await;
 
         let na = n.clone();
         let ta = tx.clone();
@@ -191,14 +192,14 @@ impl BGPNeighbor {
             {
                 s = n.lock().await.attributes.hold_time;
             }
-            println!("Sleeping for {} seconds", s as u64 / 3);
+            // println!("Sleeping for {} seconds", s as u64 / 3);
             sleep(Duration::from_secs(s as u64 / 3)).await;
             tx.send(Event::KeepaliveTimerExpires).await.unwrap();
         }
     }
 
     async fn timer_keepalive(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>) {
-        println!("Starting keepalive timer");
+        println!("FSM: Starting TimerKeepalive");
         loop {
             sleep(Duration::from_secs(1)).await;
             let k;
@@ -209,7 +210,7 @@ impl BGPNeighbor {
                 k = n.attributes.keepalive_timer;
                 h = n.attributes.hold_time as usize;
             }
-            println!("Keepalive incremented");
+            println!("FSM: TimerKeepalive incremented");
             if k > h {
                 tx.send(Event::KeepaliveTimerExpires).await.unwrap()
             }
@@ -488,12 +489,13 @@ impl BGPNeighbor {
     ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
-                {
-                    let mut n = nb.lock().await;
-                    n.attributes.keepalive_timer = 0;
-                    println!("Keepalive reset");
-                }
-                tb.send(Event::KeepAliveMsg).await.unwrap();
+                BGPNeighbor::process_message_keepalive(nb).await;
+                // {
+                //     let mut n = nb.lock().await;
+                //     n.attributes.keepalive_timer = 0;
+                //     // println!("Keepalive reset");
+                // }
+                // tb.send(Event::KeepAliveMsg).await.unwrap();
             }
             bgp::BGPMessageBody::Open(body) => {
                 println!("FSM OPENSENT: Open {}", body);
@@ -580,13 +582,14 @@ impl BGPNeighbor {
     ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
+                BGPNeighbor::process_message_keepalive(nb.clone()).await;
                 {
                     let mut n = nb.lock().await;
-                    n.attributes.keepalive_timer = 0;
+                    // n.attributes.keepalive_timer = 0;
                     n.attributes.state = BGPState::Established
                 }
                 println!("FSM: OpenConfirm to Established");
-                tb.send(Event::KeepAliveMsg).await.unwrap();
+                // tb.send(Event::KeepAliveMsg).await.unwrap();
             }
             bgp::BGPMessageBody::Notification(_body) => {
                 tb.send(Event::NotifMsg).await.unwrap();
@@ -604,12 +607,7 @@ impl BGPNeighbor {
     ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
-                {
-                    let mut n = nb.lock().await;
-                    n.attributes.keepalive_timer = 0;
-                    println!("Keepalive reset");
-                }
-                tb.send(Event::KeepAliveMsg).await.unwrap();
+                BGPNeighbor::process_message_keepalive(nb).await;
             }
             bgp::BGPMessageBody::Notification(_body) => {
                 tb.send(Event::NotifMsg).await.unwrap();
@@ -621,6 +619,11 @@ impl BGPNeighbor {
                 println!("Unimplemented");
             }
         };
+    }
+
+    async fn process_message_keepalive(nb: Arc<Mutex<BGPNeighbor>>) {
+        let mut n = nb.lock().await;
+        n.attributes.keepalive_timer = 0;
     }
 
     async fn process_message_idle(
@@ -664,11 +667,11 @@ impl BGPNeighbor {
         let body = bgp::BGPKeepaliveMessage::new().unwrap();
         let message: Vec<u8> = bgp::Message::new(
             bgp::MessageType::KEEPALIVE,
-            bgp::BGPMessageBody::Keepalive(body),
+            bgp::BGPMessageBody::Keepalive(body.clone()),
         )
         .unwrap()
         .into();
-        println!("Sending keepalive");
+        println!("FSM KeepaliveTimerExpires: Sending {:?}", body);
         let r = server.send(message).await;
         match r {
             Ok(_) => Ok(()),
