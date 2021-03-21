@@ -1,6 +1,10 @@
 use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
 use std::error::Error;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
@@ -8,41 +12,109 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use crate::bgp;
+use crate::config;
 
-#[derive(Default, Builder, Debug)]
+#[derive(Builder, Debug)]
 #[builder(setter(into))]
 pub struct BGPSpeaker {
     local_asn: u16,
     router_id: u32,
     hold_time: u16,
+    local_ip: Ipv4Addr,
+    local_port: u16,
 
     neighbors: Vec<Arc<Mutex<BGPNeighbor>>>,
 }
 
 impl BGPSpeaker {
-    pub fn new(local_asn: u16, router_id: u32, hold_time: u16) -> Self {
+    pub fn new(
+        local_asn: u16,
+        router_id: u32,
+        hold_time: u16,
+        local_ip: Ipv4Addr,
+        local_port: u16,
+    ) -> Self {
         BGPSpeakerBuilder::default()
             .local_asn(local_asn)
             .router_id(router_id)
             .hold_time(hold_time)
+            .local_ip(local_ip)
+            .local_port(local_port)
             .neighbors(vec![])
             .build()
             .unwrap()
     }
-    pub fn add_neighbor(&mut self, socket: TcpStream) {
+
+    pub async fn add_neighbor(&mut self, config: config::Neighbor) {
         let n = Arc::new(Mutex::new(BGPNeighbor::new(
+            config.ip.parse().unwrap(),
+            config.port,
+            config.asn,
             self.local_asn,
             self.router_id,
             self.hold_time,
+            BGPState::Active,
         )));
         self.neighbors.push(n.clone());
-        tokio::spawn(BGPNeighbor::fsm(
-            n,
-            socket,
-            // self.local_asn,
-            // self.router_id,
-            // self.hold_time,
-        ));
+    }
+
+    async fn add_incoming(&mut self, socket: TcpStream, addr: SocketAddr) {
+        let n = Arc::new(Mutex::new(BGPNeighbor::new(
+            addr.ip(),
+            addr.port(),
+            0,
+            self.local_asn,
+            self.router_id,
+            self.hold_time,
+            BGPState::Active,
+        )));
+        self.neighbors.push(n.clone());
+        tokio::spawn(BGPNeighbor::fsm(n, socket));
+    }
+
+    pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
+        {
+            let s = speaker.lock().await;
+            for neighbor in s.neighbors.clone() {
+                tokio::spawn(async move { BGPSpeaker::connect(neighbor.clone()).await });
+            }
+        }
+
+        tokio::spawn(async move { BGPSpeaker::listen(speaker.clone()).await });
+        loop {
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
+        let local_ip;
+        let local_port;
+        {
+            let s = speaker.lock().await;
+            local_ip = s.local_ip;
+            local_port = s.local_port;
+        }
+
+        let listener = TcpListener::bind(local_ip.to_string() + ":" + &local_port.to_string())
+            .await
+            .unwrap();
+
+        loop {
+            let (socket, addr) = listener.accept().await.unwrap();
+            {
+                let mut speaker = speaker.lock().await;
+                speaker.add_incoming(socket, addr).await;
+            }
+        }
+    }
+
+    async fn connect(neighbor: Arc<Mutex<BGPNeighbor>>) {
+        let n = neighbor.lock().await;
+        let socket = TcpStream::connect(n.remote_ip.to_string() + ":" + &n.remote_port.to_string())
+            .await
+            .unwrap();
+
+        tokio::spawn(BGPNeighbor::fsm(neighbor.clone(), socket));
     }
 }
 
@@ -120,27 +192,42 @@ enum Event {
     UpdateMsgErr,
 }
 
-#[derive(Default, Builder, Debug, Clone, Copy)]
-#[builder(default)]
+#[derive(Builder, Debug, Clone, Copy)]
 pub struct BGPNeighbor {
+    remote_ip: IpAddr,
+    remote_port: u16,
     remote_asn: u16,
     router_id: u32,
     attributes: BGPSessionAttributes,
     local_asn: u16,
     local_router_id: u32,
     local_hold_time: u16,
+    state: BGPState,
 }
 
 impl BGPNeighbor {
-    pub fn new(local_asn: u16, local_router_id: u32, local_hold_time: u16) -> Self {
+    pub fn new(
+        remote_ip: IpAddr,
+        remote_port: u16,
+        remote_asn: u16,
+        local_asn: u16,
+        local_router_id: u32,
+        local_hold_time: u16,
+        state: BGPState,
+    ) -> Self {
         let attr = BGPSessionAttributesBuilder::default()
             .hold_time(local_hold_time)
             .build()
             .unwrap();
         BGPNeighborBuilder::default()
+            .remote_ip(remote_ip)
+            .remote_port(remote_port)
+            .remote_asn(remote_asn)
+            .router_id(0)
             .local_hold_time(local_hold_time)
             .local_router_id(local_router_id)
             .local_asn(local_asn)
+            .state(state)
             .attributes(attr)
             .build()
             .unwrap()
