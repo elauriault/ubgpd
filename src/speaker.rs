@@ -50,40 +50,39 @@ impl BGPSpeaker {
             config.ip.parse().unwrap(),
             config.port,
             config.asn,
-            self.local_asn,
-            self.router_id,
             self.hold_time,
-            BGPState::Active,
+            BGPState::Connect,
         )));
-        self.neighbors.push(n.clone());
+        self.neighbors.push(n);
     }
 
-    async fn add_incoming(&mut self, socket: TcpStream, addr: SocketAddr) {
-        let n = Arc::new(Mutex::new(BGPNeighbor::new(
-            addr.ip(),
-            addr.port(),
-            0,
-            self.local_asn,
-            self.router_id,
-            self.hold_time,
-            BGPState::Active,
-        )));
-        self.neighbors.push(n.clone());
-        tokio::spawn(BGPNeighbor::fsm(n, socket));
+    async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
+        let n;
+        {
+            let mut s = speaker.lock().await;
+            n = Arc::new(Mutex::new(BGPNeighbor::new(
+                addr.ip(),
+                addr.port(),
+                0,
+                s.hold_time,
+                BGPState::Active,
+            )));
+            s.neighbors.push(n.clone());
+        }
+        tokio::spawn(BGPNeighbor::fsm(n, socket, speaker.clone()));
     }
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
         {
-            let s = speaker.lock().await;
+            let s = speaker.clone();
+            let s = s.lock().await;
             for neighbor in s.neighbors.clone() {
-                tokio::spawn(async move { BGPSpeaker::connect(neighbor.clone()).await });
+                let speaker = speaker.clone();
+                tokio::spawn(async move { BGPSpeaker::connect(speaker, neighbor).await });
             }
         }
 
-        tokio::spawn(async move { BGPSpeaker::listen(speaker.clone()).await });
-        loop {
-            sleep(Duration::from_secs(1)).await;
-        }
+        tokio::spawn(async move { BGPSpeaker::listen(speaker).await });
     }
 
     async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
@@ -101,20 +100,21 @@ impl BGPSpeaker {
 
         loop {
             let (socket, addr) = listener.accept().await.unwrap();
-            {
-                let mut speaker = speaker.lock().await;
-                speaker.add_incoming(socket, addr).await;
-            }
+            BGPSpeaker::add_incoming(speaker.clone(), socket, addr).await;
         }
     }
 
-    async fn connect(neighbor: Arc<Mutex<BGPNeighbor>>) {
-        let n = neighbor.lock().await;
-        let socket = TcpStream::connect(n.remote_ip.to_string() + ":" + &n.remote_port.to_string())
-            .await
-            .unwrap();
+    async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<BGPNeighbor>>) {
+        let socket;
+        {
+            let mut n = neighbor.lock().await;
+            socket = TcpStream::connect(n.remote_ip.to_string() + ":" + &n.remote_port.to_string())
+                .await
+                .unwrap();
+            n.attributes.state = BGPState::Connect;
+        }
 
-        tokio::spawn(BGPNeighbor::fsm(neighbor.clone(), socket));
+        tokio::spawn(BGPNeighbor::fsm(neighbor.clone(), socket, speaker));
     }
 }
 
@@ -199,10 +199,6 @@ pub struct BGPNeighbor {
     remote_asn: u16,
     router_id: u32,
     attributes: BGPSessionAttributes,
-    local_asn: u16,
-    local_router_id: u32,
-    local_hold_time: u16,
-    state: BGPState,
 }
 
 impl BGPNeighbor {
@@ -210,13 +206,12 @@ impl BGPNeighbor {
         remote_ip: IpAddr,
         remote_port: u16,
         remote_asn: u16,
-        local_asn: u16,
-        local_router_id: u32,
-        local_hold_time: u16,
+        hold_time: u16,
         state: BGPState,
     ) -> Self {
         let attr = BGPSessionAttributesBuilder::default()
-            .hold_time(local_hold_time)
+            .hold_time(hold_time)
+            .state(state)
             .build()
             .unwrap();
         BGPNeighborBuilder::default()
@@ -224,26 +219,44 @@ impl BGPNeighbor {
             .remote_port(remote_port)
             .remote_asn(remote_asn)
             .router_id(0)
-            .local_hold_time(local_hold_time)
-            .local_router_id(local_router_id)
-            .local_asn(local_asn)
-            .state(state)
             .attributes(attr)
             .build()
             .unwrap()
     }
 
-    async fn fsm(n: Arc<Mutex<BGPNeighbor>>, s: TcpStream) {
+    async fn fsm(n: Arc<Mutex<BGPNeighbor>>, s: TcpStream, speaker: Arc<Mutex<BGPSpeaker>>) {
         println!("starting fsm for {:?} with {:?}", n, s);
 
         let (tx, mut rx) = mpsc::channel::<Event>(100);
 
-        // let _ = tx.send(Event::AutomaticStart).await;
-        // let _ = tx.send(Event::TcpConnectionConfirmed).await;
-
         let mut server = Framed::new(s, bgp::BGPMessageCodec);
 
-        // let _ = tx.send(Event::TcpConnectionConfirmed).await;
+        let state;
+        {
+            let n = n.lock().await;
+            state = n.attributes.state;
+        }
+        match state {
+            BGPState::Active => {
+                BGPNeighbor::process_event(
+                    Event::TcpConnectionConfirmed,
+                    speaker.clone(),
+                    n.clone(),
+                    &mut server,
+                )
+                .await;
+            }
+            BGPState::Connect => {
+                BGPNeighbor::process_event(
+                    Event::TcpConnectionValid,
+                    speaker.clone(),
+                    n.clone(),
+                    &mut server,
+                )
+                .await;
+            }
+            _ => {}
+        };
 
         let na = n.clone();
         let ta = tx.clone();
@@ -255,10 +268,10 @@ impl BGPNeighbor {
         loop {
             tokio::select! {
                 Some(e) = rx.recv() => {
-                    BGPNeighbor::process_event(e,n.clone(),&mut server).await;
+                    BGPNeighbor::process_event(e,speaker.clone(),n.clone(),&mut server).await;
                 }
                 Some(m) = BGPNeighbor::read_message(&mut server) => {
-                    BGPNeighbor::process_message(m,n.clone(),tx.clone()).await;
+                    BGPNeighbor::process_message(m,speaker.clone(),n.clone(),tx.clone()).await;
                 }
             }
         }
@@ -279,7 +292,6 @@ impl BGPNeighbor {
             {
                 s = n.lock().await.attributes.hold_time;
             }
-            // println!("Sleeping for {} seconds", s as u64 / 3);
             sleep(Duration::from_secs(s as u64 / 3)).await;
             tx.send(Event::KeepaliveTimerExpires).await.unwrap();
         }
@@ -306,6 +318,7 @@ impl BGPNeighbor {
 
     async fn process_event(
         e: Event,
+        s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
@@ -317,15 +330,15 @@ impl BGPNeighbor {
         match state {
             BGPState::Active => {
                 println!("FSM ACTIVE: received {:?}", e);
-                BGPNeighbor::process_event_active(e, nb, server).await;
+                BGPNeighbor::process_event_active(e, s, nb, server).await;
             }
             BGPState::Connect => {
                 println!("FSM CONNECT: received {:?}", e);
-                BGPNeighbor::process_event_connect(e, nb, server).await;
+                BGPNeighbor::process_event_connect(e, s, nb, server).await;
             }
             BGPState::OpenConfirm => {
                 println!("FSM OPENCONFIRM: received {:?}", e);
-                BGPNeighbor::process_event_openconfirm(e, nb, server).await;
+                BGPNeighbor::process_event_openconfirm(e, s, nb, server).await;
             }
             BGPState::OpenSent => {
                 println!("FSM OPENSENT: received {:?}", e);
@@ -368,6 +381,7 @@ impl BGPNeighbor {
 
     async fn process_event_connect(
         e: Event,
+        s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
@@ -381,6 +395,25 @@ impl BGPNeighbor {
             Event::AutomaticStart => {
                 BGPNeighbor::init_peer(nb).await;
             }
+            Event::TcpConnectionValid => {
+                let asn;
+                let rid;
+                let hold;
+                {
+                    let s = s.lock().await;
+                    asn = s.local_asn;
+                    rid = s.router_id;
+                    hold = s.hold_time;
+                }
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold)
+                    .await
+                    .unwrap();
+                {
+                    let mut n = nb.lock().await;
+                    n.attributes.state = BGPState::OpenSent;
+                }
+                println!("FSM: Connect to OpenSent");
+            }
             _ => {
                 println!("FSM CONNECT: {:?} looks like an error", e);
             }
@@ -389,6 +422,7 @@ impl BGPNeighbor {
 
     async fn process_event_active(
         e: Event,
+        s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
@@ -407,10 +441,10 @@ impl BGPNeighbor {
                 let rid;
                 let hold;
                 {
-                    let n = nb.lock().await;
-                    asn = n.local_asn;
-                    rid = n.local_router_id;
-                    hold = n.local_hold_time;
+                    let s = s.lock().await;
+                    asn = s.local_asn;
+                    rid = s.router_id;
+                    hold = s.hold_time;
                 }
                 let _ = BGPNeighbor::send_open(server, asn, rid, hold)
                     .await
@@ -465,6 +499,7 @@ impl BGPNeighbor {
 
     async fn process_event_openconfirm(
         e: Event,
+        s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
@@ -486,10 +521,10 @@ impl BGPNeighbor {
                 let rid;
                 let hold;
                 {
-                    let n = nb.lock().await;
-                    asn = n.local_asn;
-                    rid = n.local_router_id;
-                    hold = n.local_hold_time;
+                    let s = s.lock().await;
+                    asn = s.local_asn;
+                    rid = s.router_id;
+                    hold = s.hold_time;
                 }
                 let _ = BGPNeighbor::send_open(server, asn, rid, hold)
                     .await
@@ -533,6 +568,7 @@ impl BGPNeighbor {
 
     async fn process_message(
         m: bgp::Message,
+        s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
         tx: mpsc::Sender<Event>,
     ) {
@@ -626,7 +662,16 @@ impl BGPNeighbor {
                     let mut n = nb.lock().await;
                     n.attributes.hold_time = body.hold_time;
                     n.router_id = body.router_id;
-                    n.remote_asn = body.local_asn;
+                    match n.remote_asn {
+                        0 => {
+                            n.remote_asn = body.local_asn;
+                        }
+                        _ => {
+                            if n.remote_asn != body.local_asn {
+                                panic!("ASN received doesn't match config");
+                            }
+                        }
+                    };
                     println!("Neighbor updated : {:?}", n);
                 }
                 let na = nb.clone();

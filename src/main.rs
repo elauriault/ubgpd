@@ -54,15 +54,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
 
     {
-        let neighbors = config.clone().neighbors.unwrap();
+        let neighbors = config.neighbors.unwrap();
         let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
         for n in neighbors {
-            speaker.add_neighbor(n.clone()).await;
+            speaker.add_neighbor(n).await;
         }
     }
 
-    tokio::spawn(async move { speaker::BGPSpeaker::start(speaker.clone()).await });
+    tokio::spawn(async move { speaker::BGPSpeaker::start(speaker).await });
 
     loop {
         sleep(Duration::from_secs(1)).await;
