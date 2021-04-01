@@ -124,7 +124,7 @@ pub struct BGPMessageHeader {
 #[builder(setter(into))]
 pub struct BGPOpenMessage {
     version: u8,
-    pub local_asn: u16,
+    pub asn: u16,
     pub hold_time: u16,
     pub router_id: u32,
     // opt_param_length: u8,
@@ -137,7 +137,7 @@ impl fmt::Display for BGPOpenMessage {
             f,
             "version : {} local_asn : {} hold_time : {} router_id : {} opt_params : {:?}",
             self.version,
-            self.local_asn,
+            self.asn,
             self.hold_time,
             Ipv4Addr::from(self.router_id),
             self.opt_params
@@ -149,7 +149,7 @@ impl Into<Vec<u8>> for BGPOpenMessage {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
         buf.write(&vec![self.version.clone()]).unwrap();
-        buf.write_u16::<BigEndian>(self.local_asn).unwrap();
+        buf.write_u16::<BigEndian>(self.asn).unwrap();
         buf.write_u16::<BigEndian>(self.hold_time).unwrap();
         buf.write_u32::<BigEndian>(self.router_id).unwrap();
         buf.write(&vec![self.opt_params.len() as u8]).unwrap();
@@ -183,7 +183,7 @@ impl From<Vec<u8>> for BGPOpenMessage {
 
         BGPOpenMessageBuilder::default()
             .version(version)
-            .local_asn(asn)
+            .asn(asn)
             .hold_time(hold)
             .router_id(rid)
             .opt_params(src[10..].to_vec())
@@ -201,7 +201,7 @@ impl BGPOpenMessage {
         let opt: Vec<u8> = BGPOptionalParameter::default().into();
         BGPOpenMessageBuilder::default()
             .version(VERSION)
-            .local_asn(asn)
+            .asn(asn)
             .hold_time(hold)
             .router_id(rid)
             .opt_params(opt)
