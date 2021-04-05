@@ -13,6 +13,7 @@ use tokio_util::codec::Framed;
 
 use crate::bgp;
 use crate::config;
+use crate::rib;
 
 #[derive(Builder, Debug)]
 #[builder(setter(into))]
@@ -641,7 +642,7 @@ impl BGPNeighbor {
                 println!("FSM OPENSENT: Open {}", body);
                 let tx;
                 {
-                    let mut n = nb.lock().await;
+                    let n = nb.lock().await;
                     tx = n.tx.clone().unwrap();
                 }
                 match BGPNeighbor::collision_detection(body.clone(), s).await {
@@ -693,7 +694,7 @@ impl BGPNeighbor {
                 println!("FSM ACTIVE: Open {}", body);
                 let tx;
                 {
-                    let mut n = nb.lock().await;
+                    let n = nb.lock().await;
                     tx = n.tx.clone().unwrap();
                 }
                 match BGPNeighbor::collision_detection(body.clone(), s).await {

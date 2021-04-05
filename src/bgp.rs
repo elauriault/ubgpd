@@ -629,23 +629,28 @@ pub enum PathAttributeValue {
     Aggregator(AggregatorValue),
 }
 
-#[derive(Debug, PartialEq, Clone, FromPrimitive)]
+#[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd)]
 pub enum OriginType {
     IGP = 0,
     EGP,
     INCOMPLETE,
 }
 
-#[derive(Debug, PartialEq, Clone, FromPrimitive)]
+#[derive(Debug, Eq, Clone, FromPrimitive)]
 enum ASPATHSegmentType {
     AsSet = 1,
     AsSequence,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+impl PartialEq for ASPATHSegmentType {
+    fn eq(&self, other: &Self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ASPATHSegment {
     path_type: ASPATHSegmentType,
-    // as_list_len: u8,
     as_list: Vec<u16>,
 }
 
@@ -661,6 +666,15 @@ impl Into<Vec<u8>> for ASPATHSegment {
         let mut buf = buf.into_inner();
         v.append(&mut buf);
         v
+    }
+}
+
+impl ASPATHSegment {
+    pub fn len(&self) -> usize {
+        match &self.path_type {
+            ASPATHSegmentType::AsSequence => self.as_list.len(),
+            ASPATHSegmentType::AsSet => 1,
+        }
     }
 }
 

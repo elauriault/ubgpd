@@ -11,6 +11,7 @@ extern crate derive_builder;
 
 mod bgp;
 mod config;
+mod rib;
 mod speaker;
 
 #[derive(Debug, StructOpt)]
