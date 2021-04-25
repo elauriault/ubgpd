@@ -4,7 +4,7 @@ use bytes::{Buf, BytesMut};
 use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::convert::{TryFrom, TryInto};
+// use std::convert::{TryFrom, TryInto};
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
@@ -316,11 +316,9 @@ impl Into<Vec<u8>> for BGPMultiprotocolCapability {
 #[derive(Default, Builder, Debug, Clone, PartialEq)]
 #[builder(setter(into))]
 pub struct BGPUpdateMessage {
-    // withdrawn_route_length: u16,
-    withdrawn_routes: Vec<NLRI>,
-    // path_attribute_length: u16,
-    path_attributes: Vec<PathAttribute>,
-    nlri: Vec<NLRI>,
+    pub withdrawn_routes: Vec<NLRI>,
+    pub path_attributes: Vec<PathAttribute>,
+    pub nlri: Vec<NLRI>,
 }
 
 impl BGPUpdateMessage {
@@ -434,7 +432,7 @@ pub struct PathAttribute {
     partial: bool,
     extended_length: bool,
     // type_code: PathAttributeType,
-    value: PathAttributeValue,
+    pub value: PathAttributeValue,
 }
 
 impl From<Vec<u8>> for PathAttribute {
@@ -686,7 +684,7 @@ pub struct AggregatorValue {
     aggregator: Ipv4Addr,
 }
 
-#[derive(Builder, Debug, Clone, PartialEq)]
+#[derive(Builder, Debug, Clone, PartialEq, Eq, Hash)]
 #[builder(setter(into))]
 pub struct NLRI {
     net: Ipv4Net,

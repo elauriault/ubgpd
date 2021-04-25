@@ -1,16 +1,20 @@
 use crate::bgp;
+use async_std::sync::{Arc, Mutex};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
-#[derive(Debug, Eq)]
+use crate::speaker;
+
+#[derive(Debug, Eq, Clone)]
 pub struct RouteAttributes {
-    next_hop: Ipv4Addr,
-    multi_exit_disc: u16,
-    local_pref: u16,
     as_path: bgp::ASPATH,
     origin: bgp::OriginType,
+    next_hop: Ipv4Addr,
+    local_pref: Option<u32>,
+    multi_exit_disc: Option<u32>,
     path_type: PathType,
     peer_type: PeeringType,
     recv_time: Instant,
@@ -18,8 +22,91 @@ pub struct RouteAttributes {
     peer_ip: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd)]
-enum PathType {
+impl RouteAttributes {
+    pub async fn new(
+        src: Vec<bgp::PathAttribute>,
+        s: Arc<Mutex<speaker::BGPSpeaker>>,
+        nb: Arc<Mutex<speaker::BGPNeighbor>>,
+    ) -> RouteAttributes {
+        let mut multi_exit_disc = None;
+        let mut local_pref = None;
+        let mut next_hop = Ipv4Addr::from([1, 1, 1, 1]);
+        let mut as_path: Vec<bgp::ASPATHSegment> = vec![];
+        let mut origin = bgp::OriginType::IGP;
+        for p in src {
+            match p.value {
+                bgp::PathAttributeValue::Origin(o) => {
+                    origin = o;
+                }
+                bgp::PathAttributeValue::AsPath(a) => {
+                    as_path = a;
+                }
+                bgp::PathAttributeValue::NextHop(n) => {
+                    next_hop = n;
+                }
+                bgp::PathAttributeValue::MultiExitDisc(m) => {
+                    multi_exit_disc = Some(m);
+                }
+                bgp::PathAttributeValue::LocalPref(l) => {
+                    local_pref = Some(l);
+                }
+                bgp::PathAttributeValue::AtomicAggregate => {}
+                bgp::PathAttributeValue::Aggregator(_) => {}
+            }
+        }
+        let local_asn;
+        {
+            let s = s.lock().await;
+            local_asn = s.local_asn;
+        }
+        let remote_asn;
+        let peer_rid;
+        let mut peer_ip = Ipv4Addr::new(0, 0, 0, 0);
+        let rip;
+        {
+            let nb = nb.lock().await;
+            remote_asn = nb.remote_asn;
+            peer_rid = nb.router_id;
+            rip = nb.remote_ip;
+        }
+
+        match rip {
+            IpAddr::V4(ipv4) => {
+                peer_ip = ipv4;
+            }
+            IpAddr::V6(_) => {}
+        }
+
+        let peer_ip = u32::from(peer_ip);
+
+        let peer_type;
+        let path_type;
+
+        if local_asn == remote_asn {
+            peer_type = PeeringType::Ibgp;
+            path_type = PathType::Internal;
+        } else {
+            peer_type = PeeringType::Ebgp;
+            path_type = PathType::External;
+        }
+
+        RouteAttributes {
+            next_hop,
+            multi_exit_disc,
+            local_pref,
+            as_path,
+            origin,
+            path_type,
+            peer_type,
+            peer_rid,
+            peer_ip,
+            recv_time: Instant::now(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]
+pub enum PathType {
     External,
     Internal,
     Aggregate,
@@ -27,8 +114,8 @@ enum PathType {
     Local,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd)]
-enum PeeringType {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]
+pub enum PeeringType {
     Ibgp,
     Ebgp,
 }
@@ -40,7 +127,6 @@ impl PartialEq for RouteAttributes {
         self.local_pref == other.local_pref
             && self.multi_exit_disc == other.multi_exit_disc
             && self.origin == other.origin
-            && self.as_path.len() == other.as_path.len()
             && slen == olen
     }
 }

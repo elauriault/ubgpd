@@ -1,9 +1,11 @@
 use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+// use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -13,17 +15,18 @@ use tokio_util::codec::Framed;
 
 use crate::bgp;
 use crate::config;
+// use crate::fib;
 use crate::rib;
 
 #[derive(Builder, Debug)]
 #[builder(setter(into))]
 pub struct BGPSpeaker {
-    local_asn: u16,
+    pub local_asn: u16,
     router_id: u32,
     hold_time: u16,
     local_ip: Ipv4Addr,
     local_port: u16,
-
+    rib: rib::Rib,
     neighbors: Vec<Arc<Mutex<BGPNeighbor>>>,
 }
 
@@ -41,6 +44,7 @@ impl BGPSpeaker {
             .hold_time(hold_time)
             .local_ip(local_ip)
             .local_port(local_port)
+            .rib(HashMap::new())
             .neighbors(vec![])
             .build()
             .unwrap()
@@ -212,10 +216,10 @@ enum Event {
 
 #[derive(Debug, Clone)]
 pub struct BGPNeighbor {
-    remote_ip: IpAddr,
+    pub remote_ip: IpAddr,
     remote_port: u16,
-    remote_asn: u16,
-    router_id: u32,
+    pub remote_asn: u16,
+    pub router_id: u32,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
     attributes: BGPSessionAttributes,
 }
@@ -620,7 +624,7 @@ impl BGPNeighbor {
             }
             BGPState::Established => {
                 println!("FSM ESTABLISHED: received {:?}", m.body);
-                BGPNeighbor::process_message_established(m, nb).await;
+                BGPNeighbor::process_message_established(m, s, nb).await;
             }
             BGPState::Idle => {
                 println!("FSM IDLE: received {:?}", m.body);
@@ -636,7 +640,7 @@ impl BGPNeighbor {
     ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
-                BGPNeighbor::process_message_keepalive(nb).await;
+                BGPNeighbor::handle_keepalive(nb).await;
             }
             bgp::BGPMessageBody::Open(body) => {
                 println!("FSM OPENSENT: Open {}", body);
@@ -746,7 +750,7 @@ impl BGPNeighbor {
     async fn process_message_openconfirm(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
-                BGPNeighbor::process_message_keepalive(nb.clone()).await;
+                BGPNeighbor::handle_keepalive(nb.clone()).await;
                 {
                     let mut n = nb.lock().await;
                     n.attributes.state = BGPState::Established
@@ -767,10 +771,14 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_established(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
+    async fn process_message_established(
+        m: bgp::Message,
+        s: Arc<Mutex<BGPSpeaker>>,
+        nb: Arc<Mutex<BGPNeighbor>>,
+    ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
-                BGPNeighbor::process_message_keepalive(nb).await;
+                BGPNeighbor::handle_keepalive(nb).await;
             }
             bgp::BGPMessageBody::Notification(_body) => {
                 let tx;
@@ -781,22 +789,12 @@ impl BGPNeighbor {
                 tx.send(Event::NotifMsg).await.unwrap();
             }
             bgp::BGPMessageBody::Update(body) => {
-                let tx;
-                {
-                    let n = nb.lock().await;
-                    tx = n.tx.clone().unwrap();
-                }
-                tx.send(Event::UpdateMsg).await.unwrap();
+                BGPNeighbor::handle_update(body, s, nb).await;
             }
             _ => {
                 println!("Unimplemented");
             }
         };
-    }
-
-    async fn process_message_keepalive(nb: Arc<Mutex<BGPNeighbor>>) {
-        let mut n = nb.lock().await;
-        n.attributes.keepalive_timer = 0;
     }
 
     async fn process_message_idle(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
@@ -805,6 +803,32 @@ impl BGPNeighbor {
                 println!("Unimplemented");
             }
         };
+    }
+
+    async fn handle_keepalive(nb: Arc<Mutex<BGPNeighbor>>) {
+        let mut n = nb.lock().await;
+        n.attributes.keepalive_timer = 0;
+    }
+
+    async fn handle_update(
+        m: bgp::BGPUpdateMessage,
+        s: Arc<Mutex<BGPSpeaker>>,
+        nb: Arc<Mutex<BGPNeighbor>>,
+    ) {
+        let ra = rib::RouteAttributes::new(m.path_attributes, s.clone(), nb).await;
+        {
+            let mut s = s.lock().await;
+            for nlri in m.nlri {
+                match s.rib.get_mut(&nlri) {
+                    None => {
+                        s.rib.insert(nlri, vec![ra.clone()]);
+                    }
+                    Some(attributes) => {
+                        attributes.push(ra.clone());
+                    }
+                }
+            }
+        }
     }
 
     async fn collision_detection(
