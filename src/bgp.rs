@@ -4,10 +4,11 @@ use bytes::{Buf, BytesMut};
 use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-// use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::result::Result;
 use std::{error::Error, fmt};
@@ -139,7 +140,7 @@ impl fmt::Display for BGPOpenMessage {
             self.version,
             self.asn,
             self.hold_time,
-            Ipv4Addr::from(self.router_id),
+            IpAddr::from(Ipv4Addr::from(self.router_id)),
             self.opt_params
         )
     }

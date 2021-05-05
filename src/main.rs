@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
         for n in neighbors {
-            speaker.add_neighbor(n).await;
+            speaker.add_neighbor(n, None).await;
         }
     }
 

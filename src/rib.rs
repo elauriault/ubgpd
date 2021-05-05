@@ -23,6 +23,12 @@ pub struct RouteAttributes {
 }
 
 impl RouteAttributes {
+    pub fn from_neighbor(&self, n: u32) -> bool {
+        if self.peer_rid == n {
+            return true;
+        }
+        false
+    }
     pub async fn new(
         src: Vec<bgp::PathAttribute>,
         s: Arc<Mutex<speaker::BGPSpeaker>>,

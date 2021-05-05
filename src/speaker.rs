@@ -1,11 +1,12 @@
 use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
+use futures::TryFutureExt;
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-// use std::time::Instant;
+use std::sync::mpsc::{channel, Receiver};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -15,7 +16,7 @@ use tokio_util::codec::Framed;
 
 use crate::bgp;
 use crate::config;
-// use crate::fib;
+use crate::fib;
 use crate::rib;
 
 #[derive(Builder, Debug)]
@@ -50,38 +51,50 @@ impl BGPSpeaker {
             .unwrap()
     }
 
-    pub async fn add_neighbor(&mut self, config: config::Neighbor) {
+    pub async fn add_neighbor(
+        &mut self,
+        config: config::Neighbor,
+        ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
+    ) {
         let n = Arc::new(Mutex::new(BGPNeighbor::new(
             config.ip.parse().unwrap(),
             config.port,
             config.asn,
             self.hold_time,
             BGPState::Idle,
+            ribtx,
         )));
         self.neighbors.push(n);
     }
 
-    async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
+    async fn add_incoming(
+        speaker: Arc<Mutex<BGPSpeaker>>,
+        socket: TcpStream,
+        addr: SocketAddr,
+        ribtx: tokio::sync::mpsc::Sender<RibEvent>,
+    ) {
+        println!("A new connection!");
         let n;
         {
             let mut s = speaker.lock().await;
             let mut asn = 0;
             let mut port = addr.port();
             let mut hold_time = s.hold_time;
-            for neighbor in s.neighbors.clone() {
-                let n = neighbor.lock().await;
-                if addr.ip() == n.remote_ip {
-                    asn = n.remote_asn;
-                    port = n.remote_port;
-                    hold_time = n.attributes.hold_time;
-                }
-            }
+            // for neighbor in s.neighbors.clone() {
+            //     let n = neighbor.lock().await;
+            //     if addr.ip() == n.remote_ip {
+            //         asn = n.remote_asn;
+            //         port = n.remote_port;
+            //         hold_time = n.attributes.hold_time;
+            //     }
+            // }
             n = Arc::new(Mutex::new(BGPNeighbor::new(
                 addr.ip(),
                 port,
                 asn,
                 hold_time,
                 BGPState::Active,
+                Some(ribtx),
             )));
             s.neighbors.push(n.clone());
         }
@@ -89,13 +102,21 @@ impl BGPSpeaker {
     }
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
-        let s = speaker.clone();
-        tokio::spawn(async move { BGPSpeaker::connection_mgr(s).await });
+        let s1 = speaker.clone();
+        let s2 = speaker.clone();
+        let (tx, rx) = mpsc::channel::<RibEvent>(100);
+        let t1 = tx.clone();
 
-        tokio::spawn(async move { BGPSpeaker::listen(speaker).await });
+        tokio::spawn(async move { BGPSpeaker::fib_mgr(s1, rx).await });
+        tokio::spawn(async move { BGPSpeaker::connection_mgr(s2, t1).await });
+
+        // tokio::spawn(async move { BGPSpeaker::listen(speaker, tx).await });
     }
 
-    async fn connection_mgr(speaker: Arc<Mutex<BGPSpeaker>>) {
+    async fn connection_mgr(
+        speaker: Arc<Mutex<BGPSpeaker>>,
+        ribtx: tokio::sync::mpsc::Sender<RibEvent>,
+    ) {
         let neighbors;
         {
             let s = speaker.lock().await;
@@ -103,11 +124,12 @@ impl BGPSpeaker {
         }
         for neighbor in neighbors {
             let speaker = speaker.clone();
-            tokio::spawn(async move { BGPSpeaker::connect(speaker, neighbor).await });
+            let ribtx = ribtx.clone();
+            tokio::spawn(async move { BGPSpeaker::connect(speaker, neighbor, ribtx).await });
         }
     }
 
-    async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
+    async fn listen(speaker: Arc<Mutex<BGPSpeaker>>, ribtx: tokio::sync::mpsc::Sender<RibEvent>) {
         let local_ip;
         let local_port;
         {
@@ -122,11 +144,15 @@ impl BGPSpeaker {
 
         loop {
             let (socket, addr) = listener.accept().await.unwrap();
-            BGPSpeaker::add_incoming(speaker.clone(), socket, addr).await;
+            BGPSpeaker::add_incoming(speaker.clone(), socket, addr, ribtx.clone()).await;
         }
     }
 
-    async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<BGPNeighbor>>) {
+    async fn connect(
+        speaker: Arc<Mutex<BGPSpeaker>>,
+        neighbor: Arc<Mutex<BGPNeighbor>>,
+        ribtx: tokio::sync::mpsc::Sender<RibEvent>,
+    ) {
         let socket;
         {
             let mut n = neighbor.lock().await;
@@ -134,9 +160,22 @@ impl BGPSpeaker {
                 .await
                 .unwrap();
             n.attributes.state = BGPState::Connect;
+            n.ribtx = Some(ribtx);
         }
 
         tokio::spawn(async move { BGPNeighbor::fsm(neighbor.clone(), socket, speaker).await });
+    }
+
+    async fn fib_mgr(
+        speaker: Arc<Mutex<BGPSpeaker>>,
+        mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
+    ) {
+        println!("starting fib manager");
+
+        loop {
+            let e = rx.recv().await;
+            println!("Fib Manager : Got {:?}", e);
+        }
     }
 }
 
@@ -183,6 +222,11 @@ pub struct BGPSessionAttributes {
 }
 
 #[derive(Debug)]
+pub enum RibEvent {
+    RibUpdated,
+}
+
+#[derive(Debug)]
 enum Event {
     ManualStart,
     ManualStop,
@@ -221,6 +265,7 @@ pub struct BGPNeighbor {
     pub remote_asn: u16,
     pub router_id: u32,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
+    ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
     attributes: BGPSessionAttributes,
 }
 
@@ -231,8 +276,10 @@ impl BGPNeighbor {
         remote_asn: u16,
         hold_time: u16,
         state: BGPState,
+        ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
     ) -> Self {
         let tx = None;
+        // let ribtx = None;
         let attributes = BGPSessionAttributesBuilder::default()
             .hold_time(hold_time)
             .state(state)
@@ -244,6 +291,7 @@ impl BGPNeighbor {
             remote_asn,
             router_id: 0,
             tx,
+            ribtx,
             attributes,
         }
     }
@@ -260,6 +308,7 @@ impl BGPNeighbor {
             let mut n = n.lock().await;
             state = n.attributes.state;
             n.tx = Some(tx.clone());
+            // let _ = n.ribtx.as_ref().unwrap().send(RibEvent::RibUpdated).await;
         }
         match state {
             BGPState::Active => {
@@ -286,9 +335,8 @@ impl BGPNeighbor {
 
         let na = n.clone();
 
-        tokio::spawn(async {
-            BGPNeighbor::timer_hold(na).await;
-        });
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let hold_task = tokio::spawn(async { BGPNeighbor::timer_hold(na, receiver).await });
 
         loop {
             tokio::select! {
@@ -296,7 +344,23 @@ impl BGPNeighbor {
                     BGPNeighbor::process_event(e,speaker.clone(),n.clone(),&mut server).await;
                 }
                 Some(m) = BGPNeighbor::read_message(&mut server) => {
-                    BGPNeighbor::process_message(m,speaker.clone(),n.clone()).await;
+                    match m {
+                        Ok(m) => {
+                            BGPNeighbor::process_message(m,speaker.clone(),n.clone()).await;
+                        },
+                        Err(_) => {
+                            BGPNeighbor::process_event(
+                                Event::TcpConnectionFails,
+                                speaker.clone(),
+                                n.clone(),
+                                &mut server,
+                            )
+                            .await;
+                            let _ = sender.send(());
+                            let _ = tokio::join!(hold_task);
+                            break;
+                        },
+                    }
                 }
             }
         }
@@ -311,7 +375,10 @@ impl BGPNeighbor {
         println!("FSM init_peer: Idle to Active");
     }
 
-    async fn timer_hold(n: Arc<Mutex<BGPNeighbor>>) {
+    async fn timer_hold(
+        n: Arc<Mutex<BGPNeighbor>>,
+        mut receiver: tokio::sync::oneshot::Receiver<()>,
+    ) {
         loop {
             let s;
             let tx;
@@ -322,6 +389,10 @@ impl BGPNeighbor {
             }
             let tx = tx.unwrap();
             sleep(Duration::from_secs(s as u64 / 3)).await;
+            if receiver.try_recv().is_ok() {
+                println!("Exiting hold timer");
+                break;
+            }
             tx.send(Event::KeepaliveTimerExpires).await.unwrap();
         }
     }
@@ -465,6 +536,9 @@ impl BGPNeighbor {
             Event::DelayOpenTimerExpires => {
                 println!("FSM ACTIVE: {:?} to be implemented", e);
             }
+            Event::TcpConnectionFails => {
+                println!("FSM ACTIVE: {:?} to be implemented", e);
+            }
             Event::TcpConnectionConfirmed => {
                 let asn;
                 let rid;
@@ -539,6 +613,9 @@ impl BGPNeighbor {
             Event::ManualStart => {
                 println!("FSM OPENCONFIRM: {:?} to be implemented", e);
             }
+            Event::TcpConnectionFails => {
+                println!("FSM OPENCONFIRM: {:?} to be implemented", e);
+            }
             Event::AutomaticStart => {
                 BGPNeighbor::init_peer(nb).await;
             }
@@ -578,6 +655,9 @@ impl BGPNeighbor {
                 println!("FSM ESTABLISHED: {:?} to be implemented", e);
             }
             Event::ManualStop => {
+                println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            }
+            Event::TcpConnectionFails => {
                 println!("FSM ESTABLISHED: {:?} to be implemented", e);
             }
             Event::TcpConnectionValid => {
@@ -815,7 +895,7 @@ impl BGPNeighbor {
         s: Arc<Mutex<BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
     ) {
-        let ra = rib::RouteAttributes::new(m.path_attributes, s.clone(), nb).await;
+        let ra = rib::RouteAttributes::new(m.path_attributes, s.clone(), nb.clone()).await;
         {
             let mut s = s.lock().await;
             for nlri in m.nlri {
@@ -828,6 +908,20 @@ impl BGPNeighbor {
                     }
                 }
             }
+            let n;
+            {
+                let nb = nb.lock().await;
+                n = nb.router_id;
+            }
+            for nlri in m.withdrawn_routes {
+                match s.rib.get_mut(&nlri) {
+                    None => {}
+                    Some(attributes) => {
+                        attributes.retain(|x| !x.from_neighbor(n));
+                    }
+                }
+            }
+            println!("RIB : {:?}", s.rib);
         }
     }
 
@@ -839,26 +933,29 @@ impl BGPNeighbor {
         let ns = s.neighbors.clone();
         for n in ns {
             let n = n.lock().await;
-            println!("{:?}", n);
-            let tx = n.tx.clone().unwrap();
-            match n.attributes.state {
-                BGPState::OpenConfirm => {
-                    if n.router_id == message.router_id {
-                        if n.router_id < s.router_id {
-                            let _ = tx.send(Event::OpenCollisionDump).await;
+            println!("Checking collision for {:?}", n);
+            let tx = n.tx.clone();
+            match tx {
+                None => {}
+                Some(t) => match n.attributes.state {
+                    BGPState::OpenConfirm => {
+                        if n.router_id == message.router_id {
+                            if n.router_id < s.router_id {
+                                let _ = t.send(Event::OpenCollisionDump).await;
+                            }
+                            return true;
                         }
-                        return true;
                     }
-                }
-                BGPState::OpenSent => {
-                    if n.router_id == message.router_id {
-                        if n.router_id < s.router_id {
-                            let _ = tx.send(Event::OpenCollisionDump).await;
+                    BGPState::OpenSent => {
+                        if n.router_id == message.router_id {
+                            if n.router_id < s.router_id {
+                                let _ = t.send(Event::OpenCollisionDump).await;
+                            }
+                            return true;
                         }
-                        return true;
                     }
-                }
-                _ => {}
+                    _ => {}
+                },
             }
         }
         false
@@ -885,7 +982,7 @@ impl BGPNeighbor {
         n.attributes.hold_time = message.hold_time;
         n.router_id = message.router_id;
         n.attributes.state = BGPState::OpenConfirm;
-        println!("Neighbor updated : {:?}", n);
+        // println!("Neighbor updated : {:?}", n);
     }
 
     async fn send_open(
@@ -934,13 +1031,16 @@ impl BGPNeighbor {
 
     async fn read_message(
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-    ) -> Option<bgp::Message> {
+    ) -> Option<Result<bgp::Message, std::io::Error>> {
         let message = server.next().await;
         match message {
-            Some(bytes) => {
-                let bytes: bgp::Message = bgp::Message::from(bytes.unwrap());
-                Some(bytes)
-            }
+            Some(bytes) => match bytes {
+                Err(e) => Some(Err(e)),
+                Ok(r) => {
+                    let bytes: bgp::Message = bgp::Message::from(r);
+                    Some(Ok(bytes))
+                }
+            },
             None => None,
         }
     }
