@@ -628,7 +628,7 @@ pub enum PathAttributeValue {
     Aggregator(AggregatorValue),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd)]
+#[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd, Ord)]
 pub enum OriginType {
     IGP = 0,
     EGP,

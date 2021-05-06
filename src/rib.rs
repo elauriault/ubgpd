@@ -111,7 +111,7 @@ impl RouteAttributes {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord)]
 pub enum PathType {
     External,
     Internal,
@@ -120,7 +120,7 @@ pub enum PathType {
     Local,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord)]
 pub enum PeeringType {
     Ibgp,
     Ebgp,
@@ -188,6 +188,60 @@ impl PartialOrd for RouteAttributes {
         }
 
         self.peer_ip.partial_cmp(&other.peer_ip)
+    }
+}
+
+impl Ord for RouteAttributes {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let lp = self.local_pref.cmp(&other.local_pref);
+        if lp != Ordering::Equal {
+            return lp;
+        }
+
+        let pt = self.path_type.cmp(&other.path_type);
+        if pt != Ordering::Equal {
+            return pt;
+        }
+
+        let slen: usize = self.as_path.iter().map(|x| x.len()).sum();
+        let olen: usize = other.as_path.iter().map(|x| x.len()).sum();
+        let path_len = slen.cmp(&olen);
+        if path_len != Ordering::Equal {
+            return path_len;
+        }
+
+        let otype = self.origin.cmp(&other.origin);
+        if otype != Ordering::Equal {
+            return otype;
+        }
+
+        let med = self.multi_exit_disc.cmp(&other.multi_exit_disc);
+        if med != Ordering::Equal {
+            return med;
+        }
+
+        let peer = self.peer_type.cmp(&other.peer_type);
+        if peer != Ordering::Equal {
+            return peer;
+        }
+
+        if self.peer_type == PeeringType::Ibgp {
+            // check igp of path and return the lowest
+        }
+
+        if self.peer_type == PeeringType::Ebgp {
+            let r_time = self.recv_time.cmp(&other.recv_time);
+            if r_time != Ordering::Equal {
+                return r_time;
+            }
+        }
+
+        let rid = self.peer_rid.cmp(&other.peer_rid);
+        if rid != Ordering::Equal {
+            return rid;
+        }
+
+        self.peer_ip.cmp(&other.peer_ip)
     }
 }
 

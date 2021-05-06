@@ -175,6 +175,12 @@ impl BGPSpeaker {
         loop {
             let e = rx.recv().await;
             println!("Fib Manager : Got {:?}", e);
+            let mut f = fib::Fib::new().await;
+            {
+                let s = speaker.lock().await;
+                f.sync(s.rib.clone()).await;
+            }
+            sleep(Duration::from_secs(1)).await;
         }
     }
 }
@@ -909,9 +915,11 @@ impl BGPNeighbor {
                 }
             }
             let n;
+            let ribtx;
             {
                 let nb = nb.lock().await;
                 n = nb.router_id;
+                ribtx = nb.ribtx.clone();
             }
             for nlri in m.withdrawn_routes {
                 match s.rib.get_mut(&nlri) {
@@ -922,6 +930,10 @@ impl BGPNeighbor {
                 }
             }
             println!("RIB : {:?}", s.rib);
+            {
+                let nb = nb.lock().await;
+                nb.ribtx.as_ref().unwrap().send(RibEvent::RibUpdated).await;
+            }
         }
     }
 

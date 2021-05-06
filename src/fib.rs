@@ -54,25 +54,28 @@ impl FibEntry {
 }
 
 #[derive(Debug, Default, PartialEq)]
-struct Fib {
+pub struct Fib {
     routes: Vec<FibEntry>,
 }
 
 impl Fib {
-    async fn new() -> Self {
+    pub async fn new() -> Self {
         let v = get_routes().await;
 
         Fib { routes: v }
     }
 
-    async fn refresh(&mut self) {
+    pub async fn refresh(&mut self) {
         let v = get_routes().await;
 
         self.routes = v;
     }
 
-    async fn sync(&mut self, rib: rib::Rib) {
+    pub async fn sync(&mut self, rib: rib::Rib) {
+        println!("sync : {:?}", self);
         for r in rib {
+            let n = r.0;
+            // let a = r.1.sort();
             println!("{:?}", r);
         }
     }
