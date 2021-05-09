@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::{Buf, BytesMut};
+use ipnet::IpNet;
 use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -700,6 +701,17 @@ impl Into<Vec<u8>> for NLRI {
         let blen = (self.net.prefix_len() as f32 / 8.0).ceil() as usize;
         buf.write(&addr[0..blen]).unwrap();
         buf.into_inner()
+    }
+}
+impl Into<Ipv4Net> for NLRI {
+    fn into(self) -> Ipv4Net {
+        self.net
+    }
+}
+
+impl Into<IpNet> for NLRI {
+    fn into(self) -> IpNet {
+        self.net.into()
     }
 }
 

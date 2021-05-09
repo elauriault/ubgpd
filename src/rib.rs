@@ -1,4 +1,3 @@
-use crate::bgp;
 use async_std::sync::{Arc, Mutex};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -6,13 +5,14 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::time::Instant;
 
+use crate::bgp;
 use crate::speaker;
 
 #[derive(Debug, Eq, Clone)]
 pub struct RouteAttributes {
     as_path: bgp::ASPATH,
     origin: bgp::OriginType,
-    next_hop: Ipv4Addr,
+    pub next_hop: Ipv4Addr,
     local_pref: Option<u32>,
     multi_exit_disc: Option<u32>,
     path_type: PathType,
