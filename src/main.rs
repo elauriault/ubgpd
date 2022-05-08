@@ -3,8 +3,8 @@ use tokio::time::{sleep, Duration};
 use async_std::sync::{Arc, Mutex};
 use std::error::Error;
 // use std::fs::File;
+use clap::Parser;
 use std::io::prelude::*;
-use structopt::StructOpt;
 
 #[macro_use]
 extern crate derive_builder;
@@ -12,19 +12,20 @@ extern crate derive_builder;
 mod bgp;
 mod config;
 mod fib;
+mod neighbor;
 mod rib;
 mod speaker;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::StructOpt)]
 #[structopt(name = "ubgpd", about = "A minimalistic bgp daemon written in rust.")]
 struct Opt {
-    #[structopt(short = "c", long = "config", default_value = "ubgpd.conf")]
+    #[structopt(short = 'c', long = "config", default_value = "ubgpd.conf")]
     config: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     let mut f = std::fs::File::open(&opt.config).unwrap();
     let mut c = String::new();
     f.read_to_string(&mut c).unwrap();

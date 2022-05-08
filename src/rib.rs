@@ -6,6 +6,7 @@ use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use crate::bgp;
+use crate::neighbor;
 use crate::speaker;
 
 #[derive(Debug, Eq, Clone)]
@@ -32,7 +33,7 @@ impl RouteAttributes {
     pub async fn new(
         src: Vec<bgp::PathAttribute>,
         s: Arc<Mutex<speaker::BGPSpeaker>>,
-        nb: Arc<Mutex<speaker::BGPNeighbor>>,
+        nb: Arc<Mutex<neighbor::BGPNeighbor>>,
     ) -> RouteAttributes {
         let mut multi_exit_disc = None;
         let mut local_pref = None;
@@ -115,9 +116,9 @@ impl RouteAttributes {
 pub enum PathType {
     External,
     Internal,
-    Aggregate,
-    Redist,
-    Local,
+    // Aggregate,
+    // Redist,
+    // Local,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord)]
