@@ -2,12 +2,12 @@ use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::IpNet;
 use ipnet::Ipv4Net;
-use ipnetwork::Ipv4Network;
+// use ipnetwork::Ipv4Network;
 use netlink_packet::RouteProtocol;
 use rtnetlink::packet::link::nlas::Nla as lnla;
 use rtnetlink::packet::nlas::route::Nla as rnla;
 use rtnetlink::packet::RouteMessage;
-use rtnetlink::{new_connection, Error, Handle, IpVersion};
+use rtnetlink::{new_connection, Handle, IpVersion};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
