@@ -15,7 +15,7 @@ pub struct Neighbor {
     pub asn: u16,
     pub ip: String,
     pub port: u16,
-    connect_retry: Option<u16>,
-    holdtime: Option<u16>,
-    keepalive_interval: Option<u16>,
+    pub connect_retry: Option<u16>,
+    pub holdtime: Option<u16>,
+    pub keepalive_interval: Option<u16>,
 }

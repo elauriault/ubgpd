@@ -29,7 +29,7 @@ serde_derive = "1.0"
 rtnetlink = "*"
 ipnetwork = "*"
 libc = "0.2"
-netlink-packet-route = "*"
+netlink-packet-route = "0.17.0"
 netlink-packet = { version = "*", features= ["rtnetlink"]}
 netlink-sys = "*"
 netlink-proto = "*"

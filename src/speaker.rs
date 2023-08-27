@@ -1,20 +1,20 @@
 use async_std::sync::{Arc, Mutex};
-use futures::prelude::sink::SinkExt;
-use futures::TryFutureExt;
+// use futures::prelude::sink::SinkExt;
+// use futures::TryFutureExt;
 use std::collections::HashMap;
-use std::error::Error;
-use std::net::IpAddr;
+// use std::error::Error;
+// use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver};
+// use std::sync::mpsc::{channel, Receiver};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
-use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
+// use tokio_stream::StreamExt;
+// use tokio_util::codec::Framed;
 
-use crate::bgp;
+// use crate::bgp;
 use crate::config;
 use crate::fib;
 use crate::neighbor;
@@ -68,7 +68,8 @@ impl BGPSpeaker {
             config.ip.parse().unwrap(),
             config.port,
             config.asn,
-            self.hold_time,
+            config.holdtime.unwrap(),
+            config.connect_retry,
             neighbor::BGPState::Idle,
             ribtx,
         )));
@@ -79,7 +80,7 @@ impl BGPSpeaker {
         speaker: Arc<Mutex<BGPSpeaker>>,
         socket: TcpStream,
         addr: SocketAddr,
-        ribtx: tokio::sync::mpsc::Sender<RibEvent>,
+        // ribtx: tokio::sync::mpsc::Sender<RibEvent>,
     ) {
         println!("A new connection!");
         let n;
@@ -96,14 +97,19 @@ impl BGPSpeaker {
             //         hold_time = n.attributes.hold_time;
             //     }
             // }
-            n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
-                addr.ip(),
-                port,
-                asn,
-                hold_time,
-                neighbor::BGPState::Active,
-                Some(ribtx),
-            )));
+            {
+                let speaker = speaker.lock().await;
+                // let ribtx = speaker.ribtx.clone();
+                n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
+                    addr.ip(),
+                    port,
+                    asn,
+                    hold_time,
+                    None,
+                    neighbor::BGPState::Active,
+                    speaker.ribtx.clone(),
+                )));
+            }
             s.neighbors.push(n.clone());
         }
         tokio::spawn(
@@ -113,7 +119,8 @@ impl BGPSpeaker {
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
         let (tx, rx) = mpsc::channel::<RibEvent>(100);
-        let t1 = tx.clone();
+        // let t1 = tx.clone();
+        // let tx = Arc::new(Mutex::new(tx));
 
         {
             let mut speaker = speaker.lock().await;
@@ -123,9 +130,9 @@ impl BGPSpeaker {
         let s1 = speaker.clone();
         let s2 = speaker.clone();
 
-        tokio::spawn(async move { BGPSpeaker::fib_mgr(s1, rx).await });
-        tokio::spawn(async move { BGPSpeaker::connection_mgr(s2).await });
-        tokio::spawn(async move { BGPSpeaker::listen(speaker, t1).await });
+        tokio::spawn(async move { BGPSpeaker::fib_mgr(speaker, rx).await });
+        tokio::spawn(async move { BGPSpeaker::connection_mgr(s1).await });
+        tokio::spawn(async move { BGPSpeaker::listen(s2).await });
     }
 
     async fn connection_mgr(speaker: Arc<Mutex<BGPSpeaker>>) {
@@ -140,7 +147,8 @@ impl BGPSpeaker {
         }
     }
 
-    async fn listen(speaker: Arc<Mutex<BGPSpeaker>>, ribtx: tokio::sync::mpsc::Sender<RibEvent>) {
+    // async fn listen(speaker: Arc<Mutex<BGPSpeaker>>, ribtx: tokio::sync::mpsc::Sender<RibEvent>) {
+    async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
         let local_ip;
         let local_port;
         {
@@ -155,7 +163,8 @@ impl BGPSpeaker {
 
         loop {
             let (socket, addr) = listener.accept().await.unwrap();
-            BGPSpeaker::add_incoming(speaker.clone(), socket, addr, ribtx.clone()).await;
+            // BGPSpeaker::add_incoming(speaker.clone(), socket, addr, ribtx.clone()).await;
+            BGPSpeaker::add_incoming(speaker.clone(), socket, addr).await;
         }
     }
 

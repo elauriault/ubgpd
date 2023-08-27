@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     {
         let neighbors = config.neighbors.unwrap();
-        let speaker = speaker.clone();
+        // let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
         for n in neighbors {
             speaker.add_neighbor(n, None).await;

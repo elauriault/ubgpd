@@ -1,13 +1,13 @@
 use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
-use futures::TryFutureExt;
-use std::collections::HashMap;
+// use futures::TryFutureExt;
+// use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver};
-use tokio::net::TcpListener;
+// use std::net::Ipv4Addr;
+// use std::net::SocketAddr;
+// use std::sync::mpsc::{channel, Receiver};
+// use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
@@ -15,8 +15,8 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use crate::bgp;
-use crate::config;
-use crate::fib;
+// use crate::config;
+// use crate::fib;
 use crate::rib;
 use crate::speaker;
 
@@ -100,6 +100,7 @@ pub struct BGPNeighbor {
     remote_port: u16,
     pub remote_asn: u16,
     pub router_id: u32,
+    connect_retry_time: Option<u16>,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
     ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     attributes: BGPSessionAttributes,
@@ -111,6 +112,7 @@ impl BGPNeighbor {
         remote_port: u16,
         remote_asn: u16,
         hold_time: u16,
+        connect_retry_time: Option<u16>,
         state: BGPState,
         ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     ) -> Self {
@@ -127,54 +129,55 @@ impl BGPNeighbor {
             remote_port,
             remote_asn,
             router_id: 0,
+            connect_retry_time,
             tx,
             ribtx,
             attributes,
         }
     }
+    /*
+        async fn fsm(neighbor: Arc<Mutex<BGPNeighbor>>, speaker: Arc<Mutex<speaker::BGPSpeaker>>) {
+            println!("starting fsm for {:?}", neighbor);
 
-    async fn fsm(neighbor: Arc<Mutex<BGPNeighbor>>, speaker: Arc<Mutex<speaker::BGPSpeaker>>) {
-        println!("starting fsm for {:?}", neighbor);
+            let (tx, mut rx) = mpsc::channel::<Event>(100);
 
-        let (tx, mut rx) = mpsc::channel::<Event>(100);
+            let state;
+            let automatic_start;
+            {
+                let mut n = neighbor.lock().await;
+                state = n.attributes.state;
+                automatic_start = n.attributes.allow_automatic_start;
+                n.tx = Some(tx.clone());
+                // let _ = n.ribtx.as_ref().unwrap().send(RibEvent::RibUpdated).await;
+            }
+            match state {
+                BGPState::Idle => match automatic_start {
+                    true => {
+                        BGPNeighbor::process_event(
+                            Event::AutomaticStart,
+                            speaker.clone(),
+                            neighbor.clone(),
+                            None,
+                        )
+                        .await;
+                    }
+                    false => {}
+                },
+                _ => {}
+            }
 
-        let state;
-        let automatic_start;
-        {
-            let mut n = neighbor.lock().await;
-            state = n.attributes.state;
-            automatic_start = n.attributes.allow_automatic_start;
-            n.tx = Some(tx.clone());
-            // let _ = n.ribtx.as_ref().unwrap().send(RibEvent::RibUpdated).await;
-        }
-        match state {
-            BGPState::Idle => match automatic_start {
-                true => {
-                    BGPNeighbor::process_event(
-                        Event::AutomaticStart,
-                        speaker.clone(),
-                        neighbor.clone(),
-                        None,
-                    )
-                    .await;
-                }
-                false => {}
-            },
-            _ => {}
-        }
-
-        loop {
-            match rx.recv().await {
-                Some(e) => {
-                    BGPNeighbor::process_event(e, speaker.clone(), neighbor.clone(), None).await;
-                }
-                None => {
-                    break;
+            loop {
+                match rx.recv().await {
+                    Some(e) => {
+                        BGPNeighbor::process_event(e, speaker.clone(), neighbor.clone(), None).await;
+                    }
+                    None => {
+                        break;
+                    }
                 }
             }
         }
-    }
-
+    */
     pub async fn fsm_tcp(
         neighbor: Arc<Mutex<BGPNeighbor>>,
         stream: TcpStream,
@@ -479,8 +482,8 @@ impl BGPNeighbor {
 
     async fn process_event_opensent(
         e: Event,
-        nb: Arc<Mutex<BGPNeighbor>>,
-        server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
+        _nb: Arc<Mutex<BGPNeighbor>>,
+        _server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
         match e {
             Event::HoldTimerExpires => {
@@ -513,7 +516,7 @@ impl BGPNeighbor {
     async fn process_event_openconfirm(
         e: Event,
         s: Arc<Mutex<speaker::BGPSpeaker>>,
-        nb: Arc<Mutex<BGPNeighbor>>,
+        _nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
         match e {
@@ -548,7 +551,7 @@ impl BGPNeighbor {
 
     async fn process_event_established(
         e: Event,
-        nb: Arc<Mutex<BGPNeighbor>>,
+        _nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
         match e {
@@ -723,7 +726,7 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_connect(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
+    async fn process_message_connect(m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
         match m.body {
             _ => {
                 println!("FSM: Shouldn't receive messages in Connect state");
@@ -781,7 +784,7 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_idle(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
+    async fn process_message_idle(m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
         match m.body {
             _ => {
                 println!("Unimplemented");
@@ -830,6 +833,9 @@ impl BGPNeighbor {
             println!("RIB : {:?}", s.rib);
             {
                 let nb = nb.lock().await;
+                // let tx = nb.ribtx.unwrap().clone();
+                // let tx = nb.ribtx.unwrap().lock().await;
+                // let t = tx.lock().await.send(speaker::RibEvent::RibUpdated).await;
                 let _ = nb
                     .ribtx
                     .as_ref()

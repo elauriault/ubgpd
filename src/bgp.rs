@@ -5,7 +5,7 @@ use ipnet::IpNet;
 use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::convert::TryInto;
+// use std::convert::TryInto;
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
@@ -643,7 +643,7 @@ enum ASPATHSegmentType {
 }
 
 impl PartialEq for ASPATHSegmentType {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         true
     }
 }

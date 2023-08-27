@@ -2,11 +2,10 @@ use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::IpNet;
 use ipnet::Ipv4Net;
-// use ipnetwork::Ipv4Network;
 use netlink_packet::RouteProtocol;
-use rtnetlink::packet::link::nlas::Nla as lnla;
-use rtnetlink::packet::nlas::route::Nla as rnla;
-use rtnetlink::packet::RouteMessage;
+use netlink_packet_route::RouteMessage;
+use netlink_packet_route::link::nlas::Nla as lnla;
+use netlink_packet_route::nlas::route::Nla as rnla;
 use rtnetlink::{new_connection, Handle, IpVersion};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -70,7 +69,7 @@ impl Fib {
         Fib { routes: v }
     }
 
-    pub async fn refresh(&mut self) {
+    pub async fn _refresh(&mut self) {
         let v = get_routes().await;
 
         self.routes = v;
@@ -88,7 +87,7 @@ impl Fib {
                 .find_route(n.clone().into(), a.next_hop, handle.clone())
                 .await
             {
-                Some(t) => {
+                Some(_t) => {
                     println!("Route {:?} already present, skipping it", n);
                 }
                 None => {
@@ -103,7 +102,7 @@ impl Fib {
         &mut self,
         subnet: Ipv4Net,
         nexthop: Ipv4Addr,
-        handle: Handle,
+        _handle: Handle,
     ) -> Option<FibEntry> {
         let routes = self.routes.clone();
         let subnet = IpNet::from(subnet);
@@ -121,9 +120,9 @@ impl Fib {
         let route = handle.route();
 
         match subnet {
-            IpNet::V6(t) => {}
+            IpNet::V6(_t) => {}
             IpNet::V4(t) => match nexthop {
-                IpAddr::V6(n) => {}
+                IpAddr::V6(_n) => {}
                 IpAddr::V4(n) => {
                     route
                         .add()
@@ -139,7 +138,7 @@ impl Fib {
         };
     }
 
-    pub async fn del_route(&mut self, entry: FibEntry, handle: Handle) {
+    pub async fn _del_route(&mut self, entry: FibEntry, handle: Handle) {
         let route = handle.route();
         route.del(entry.rm).execute().await.unwrap();
     }
