@@ -433,7 +433,7 @@ pub struct PathAttribute {
     transitive: bool,
     partial: bool,
     extended_length: bool,
-    // type_code: PathAttributeType,
+    type_code: PathAttributeType,
     pub value: PathAttributeValue,
 }
 
@@ -529,6 +529,15 @@ impl From<Vec<u8>> for PathAttribute {
                 };
                 PathAttributeValue::Aggregator(ag)
             }
+            PathAttributeType::Community => PathAttributeValue::Community,
+            PathAttributeType::OriginatorId => PathAttributeValue::OriginatorId,
+            PathAttributeType::ClusterList => PathAttributeValue::ClusterList,
+            PathAttributeType::DPA => PathAttributeValue::DPA,
+            PathAttributeType::Advertiser => PathAttributeValue::Advertiser,
+            PathAttributeType::RcidPathClusterId => PathAttributeValue::RcidPathClusterId,
+            PathAttributeType::MPReachableNLRI => PathAttributeValue::MPReachableNLRI,
+            PathAttributeType::MPUnreachableNLRI => PathAttributeValue::MPUnreachableNLRI,
+            PathAttributeType::ExtCommunities => PathAttributeValue::ExtCommunities,
         };
 
         PathAttribute {
@@ -536,6 +545,7 @@ impl From<Vec<u8>> for PathAttribute {
             transitive,
             partial,
             extended_length,
+            type_code,
             value,
         }
     }
@@ -597,6 +607,33 @@ impl Into<Vec<u8>> for PathAttribute {
                 val.write_u16::<BigEndian>(value.last_as).unwrap();
                 val.write_u32::<BigEndian>(value.aggregator.into()).unwrap();
             }
+            PathAttributeValue::Community => {
+                code = 8;
+            }
+            PathAttributeValue::OriginatorId => {
+                code = 9;
+            }
+            PathAttributeValue::ClusterList => {
+                code = 10;
+            }
+            PathAttributeValue::DPA => {
+                code = 11;
+            }
+            PathAttributeValue::Advertiser => {
+                code = 12;
+            }
+            PathAttributeValue::RcidPathClusterId => {
+                code = 13;
+            }
+            PathAttributeValue::MPReachableNLRI => {
+                code = 14;
+            }
+            PathAttributeValue::MPUnreachableNLRI => {
+                code = 15;
+            }
+            PathAttributeValue::ExtCommunities => {
+                code = 16;
+            }
         }
         buf.push(code);
         let mut val = val.into_inner();
@@ -608,7 +645,7 @@ impl Into<Vec<u8>> for PathAttribute {
 }
 
 #[derive(Debug, PartialEq, Clone, FromPrimitive, Copy)]
-enum PathAttributeType {
+pub enum PathAttributeType {
     Origin = 1,
     AsPath,
     NextHop,
@@ -616,6 +653,15 @@ enum PathAttributeType {
     LocalPref,
     AtomicAggregate,
     Aggregator,
+    Community,
+    OriginatorId,
+    ClusterList,
+    DPA,
+    Advertiser,
+    RcidPathClusterId,
+    MPReachableNLRI,
+    MPUnreachableNLRI,
+    ExtCommunities,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -627,6 +673,15 @@ pub enum PathAttributeValue {
     LocalPref(u32),
     AtomicAggregate,
     Aggregator(AggregatorValue),
+    Community,
+    OriginatorId,
+    ClusterList,
+    DPA,
+    Advertiser,
+    RcidPathClusterId,
+    MPReachableNLRI,
+    MPUnreachableNLRI,
+    ExtCommunities,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd, Ord)]

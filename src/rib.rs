@@ -59,6 +59,7 @@ impl RouteAttributes {
                 }
                 bgp::PathAttributeValue::AtomicAggregate => {}
                 bgp::PathAttributeValue::Aggregator(_) => {}
+                _ => {}
             }
         }
         let local_asn;
