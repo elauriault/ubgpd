@@ -56,6 +56,20 @@ pub enum BGPError {
 
 #[derive(Debug, Clone, FromPrimitive, PartialEq)]
 #[repr(u8)]
+pub enum AFI {
+    IPv4 = 1,
+    IPv6,
+}
+
+#[derive(Debug, Clone, FromPrimitive, PartialEq)]
+#[repr(u8)]
+pub enum SAFI {
+    NLRIUnicast = 1,
+    NLRIMulticast,
+}
+
+#[derive(Debug, Clone, FromPrimitive, PartialEq)]
+#[repr(u8)]
 pub enum MessageType {
     OPEN = 1,
     UPDATE,
@@ -220,7 +234,10 @@ pub struct BGPOptionalParameter {
 
 impl Default for BGPOptionalParameter {
     fn default() -> Self {
-        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability { afi: 1, safi: 1 };
+        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+            afi: AFI::IPv4,
+            safi: SAFI::NLRIUnicast,
+        };
         let pc: BGPCapability = BGPCapability {
             capability_code: BGPCapabilityCode::Multiprotocol,
             capability_value: cv.into(),
@@ -301,8 +318,8 @@ enum BGPCapabilityCode {
 
 #[derive(Debug)]
 pub struct BGPMultiprotocolCapability {
-    afi: u16,
-    safi: u8,
+    afi: AFI,
+    safi: SAFI,
 }
 
 impl Into<Vec<u8>> for BGPMultiprotocolCapability {
@@ -1145,7 +1162,10 @@ mod tests {
     #[test]
     fn test_opt_params() {
         let mut plist: Vec<BGPOptionalParameter> = vec![];
-        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability { afi: 1, safi: 1 };
+        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+            afi: AFI::IPv4,
+            safi: SAFI::NLRIUnicast,
+        };
         let pc: BGPCapability = BGPCapability {
             capability_code: BGPCapabilityCode::Multiprotocol,
             capability_value: cv.try_into().unwrap(),
