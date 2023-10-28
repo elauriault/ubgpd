@@ -1,5 +1,8 @@
 use serde_derive::Deserialize;
 use std::net::Ipv4Addr;
+
+use crate::bgp;
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub asn: u16,
@@ -18,4 +21,5 @@ pub struct Neighbor {
     pub connect_retry: Option<u16>,
     pub holdtime: Option<u16>,
     pub keepalive_interval: Option<u16>,
+    pub families: Option<Vec<bgp::AddressFamily>>,
 }

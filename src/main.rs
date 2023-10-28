@@ -61,6 +61,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
         for n in neighbors {
+            n.families = match n.families {
+                Some(i) => Some(i),
+                None => {
+                    let a = bgp::AddressFamily {
+                        afi: bgp::AFI::Ipv4,
+                        safi: bgp::SAFI::NLRIUnicast,
+                    };
+                    Some(vec![a])
+                }
+            };
             speaker.add_neighbor(n, None).await;
         }
     }

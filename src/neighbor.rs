@@ -911,6 +911,8 @@ impl BGPNeighbor {
         asn: u16,
         rid: u32,
         hold: u16,
+        // afisafi: Vec<(bgp::AFI, bgp::SAFI)>,
+        families: Vec<bgp::AddressFamily>,
     ) -> Result<(), Box<dyn Error>> {
         let body = bgp::BGPOpenMessage::new(asn, rid, hold).unwrap();
         println!("open :{:?}", body);

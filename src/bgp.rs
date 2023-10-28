@@ -5,6 +5,7 @@ use ipnet::IpNet;
 use ipnet::Ipv4Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use serde_derive::Deserialize;
 // use std::convert::TryInto;
 use std::io::prelude::*;
 use std::io::Cursor;
@@ -54,18 +55,24 @@ pub enum BGPError {
     IOError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize)]
 #[repr(u8)]
 pub enum AFI {
-    IPv4 = 1,
-    IPv6,
+    Ipv4 = 1,
+    Ipv6,
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize)]
 #[repr(u8)]
 pub enum SAFI {
     NLRIUnicast = 1,
     NLRIMulticast,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AddressFamily {
+    pub afi: AFI,
+    pub safi: SAFI,
 }
 
 #[derive(Debug, Clone, FromPrimitive, PartialEq)]
@@ -235,7 +242,7 @@ pub struct BGPOptionalParameter {
 impl Default for BGPOptionalParameter {
     fn default() -> Self {
         let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
-            afi: AFI::IPv4,
+            afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
         let pc: BGPCapability = BGPCapability {
@@ -1163,7 +1170,7 @@ mod tests {
     fn test_opt_params() {
         let mut plist: Vec<BGPOptionalParameter> = vec![];
         let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
-            afi: AFI::IPv4,
+            afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
         let pc: BGPCapability = BGPCapability {
