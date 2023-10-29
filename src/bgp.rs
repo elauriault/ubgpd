@@ -220,8 +220,36 @@ impl BGPOpenMessage {
         self.opt_params.len() + 10 * size_of::<u16>()
     }
 
-    pub fn new(asn: u16, rid: u32, hold: u16) -> Result<BGPOpenMessage, String> {
-        let opt: Vec<u8> = BGPOptionalParameter::default().into();
+    pub fn new(
+        asn: u16,
+        rid: u32,
+        hold: u16,
+        families: Option<Vec<AddressFamily>>,
+    ) -> Result<BGPOpenMessage, String> {
+        let opt: Vec<u8> = match families {
+            None => BGPOptionalParameter::default().into(),
+            Some(families) => {
+                let mut opt: Vec<u8> = vec![];
+                for fam in families {
+                    let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+                        afi: fam.afi,
+                        safi: fam.safi,
+                    };
+                    let pc: BGPCapability = BGPCapability {
+                        capability_code: BGPCapabilityCode::Multiprotocol,
+                        capability_value: cv.into(),
+                    };
+                    let pc: Vec<u8> = pc.into();
+                    opt.extend(pc);
+                }
+                let o = BGPOptionalParameter {
+                    param_type: BGPOptionalParameterType::Capability,
+                    param_value: opt,
+                };
+                o.into()
+            }
+        };
+        // let opt: Vec<u8> = BGPOptionalParameter::default().into();
         BGPOpenMessageBuilder::default()
             .version(VERSION)
             .asn(asn)
@@ -1215,7 +1243,7 @@ mod tests {
     }
     #[test]
     fn test_open_message() {
-        let body = BGPOpenMessage::new(123, 345, 3).unwrap();
+        let body = BGPOpenMessage::new(123, 345, 3, None).unwrap();
         let test_msg: Vec<u8> = Message::new(MessageType::OPEN, BGPMessageBody::Open(body))
             .unwrap()
             .try_into()
