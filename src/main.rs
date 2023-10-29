@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     f.read_to_string(&mut c).unwrap();
     let mut config: config::Config = toml::from_str(&c).unwrap();
 
-    config.holdtime = match config.holdtime {
+    config.hold_time = match config.hold_time {
         Some(h) => Some(h),
         None => Some(3),
     };
@@ -46,30 +46,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => Some("127.0.0.1".parse().unwrap()),
     };
 
+    config.families = match config.families {
+        Some(i) => Some(i),
+        None => {
+            let a = bgp::AddressFamily {
+                afi: bgp::AFI::Ipv4,
+                safi: bgp::SAFI::NLRIUnicast,
+            };
+            Some(vec![a])
+        }
+    };
+
     println!("config: {:?}", config);
 
+    let families = config.families.clone();
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(
         config.asn,
         u32::from(config.rid),
-        config.holdtime.unwrap(),
+        config.hold_time.unwrap(),
         config.localip.unwrap(),
         config.port.unwrap(),
+        families.unwrap(),
     )));
 
     {
         let neighbors = config.neighbors.unwrap();
         // let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
-        for n in neighbors {
+        for mut n in neighbors {
+            let families = config.families.clone();
             n.families = match n.families {
                 Some(i) => Some(i),
-                None => {
-                    let a = bgp::AddressFamily {
-                        afi: bgp::AFI::Ipv4,
-                        safi: bgp::SAFI::NLRIUnicast,
-                    };
-                    Some(vec![a])
-                }
+                None => families.clone(),
+            };
+            n.hold_time = match n.hold_time {
+                Some(i) => Some(i),
+                None => Some(speaker.hold_time),
             };
             speaker.add_neighbor(n, None).await;
         }

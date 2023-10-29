@@ -44,7 +44,7 @@ pub struct BGPSessionAttributes {
     hold_timer: usize,
     keepalive_time: usize,
     keepalive_timer: usize,
-    connect_retry_time: usize,
+    connect_retry_time: u16,
     connect_retry_timer: usize,
     connect_retry_counter: usize,
     // accept_connections_unconfigured_peers: bool,
@@ -100,7 +100,8 @@ pub struct BGPNeighbor {
     remote_port: u16,
     pub remote_asn: u16,
     pub router_id: u32,
-    connect_retry_time: Option<u16>,
+    // connect_retry_time: Option<u16>,
+    families: Option<Vec<bgp::AddressFamily>>,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
     ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     attributes: BGPSessionAttributes,
@@ -112,13 +113,15 @@ impl BGPNeighbor {
         remote_port: u16,
         remote_asn: u16,
         hold_time: u16,
-        connect_retry_time: Option<u16>,
+        connect_retry_time: u16,
         state: BGPState,
+        families: Option<Vec<bgp::AddressFamily>>,
         ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     ) -> Self {
         let tx = None;
         // let ribtx = None;
         let attributes = BGPSessionAttributesBuilder::default()
+            .connect_retry_time(connect_retry_time)
             .hold_time(hold_time)
             .state(state)
             .allow_automatic_start(true)
@@ -129,7 +132,8 @@ impl BGPNeighbor {
             remote_port,
             remote_asn,
             router_id: 0,
-            connect_retry_time,
+            // connect_retry_time,
+            families,
             tx,
             ribtx,
             attributes,
@@ -412,13 +416,18 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
+                let families;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
                     rid = s.router_id;
                     hold = s.hold_time;
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold)
+                {
+                    let n = nb.lock().await;
+                    families = n.families.clone();
+                }
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
                     .await
                     .unwrap();
                 {
@@ -456,13 +465,18 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
+                let families;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
                     rid = s.router_id;
                     hold = s.hold_time;
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold)
+                {
+                    let n = nb.lock().await;
+                    families = n.families.clone();
+                }
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
                     .await
                     .unwrap();
                 {
@@ -516,7 +530,7 @@ impl BGPNeighbor {
     async fn process_event_openconfirm(
         e: Event,
         s: Arc<Mutex<speaker::BGPSpeaker>>,
-        _nb: Arc<Mutex<BGPNeighbor>>,
+        nb: Arc<Mutex<BGPNeighbor>>,
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     ) {
         match e {
@@ -533,13 +547,18 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
+                let families;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
                     rid = s.router_id;
                     hold = s.hold_time;
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold)
+                {
+                    let n = nb.lock().await;
+                    families = n.families.clone();
+                }
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
                     .await
                     .unwrap();
             }
@@ -911,10 +930,9 @@ impl BGPNeighbor {
         asn: u16,
         rid: u32,
         hold: u16,
-        // afisafi: Vec<(bgp::AFI, bgp::SAFI)>,
-        families: Vec<bgp::AddressFamily>,
+        families: Option<Vec<bgp::AddressFamily>>,
     ) -> Result<(), Box<dyn Error>> {
-        let body = bgp::BGPOpenMessage::new(asn, rid, hold).unwrap();
+        let body = bgp::BGPOpenMessage::new(asn, rid, hold, families).unwrap();
         println!("open :{:?}", body);
         let message: Vec<u8> =
             bgp::Message::new(bgp::MessageType::OPEN, bgp::BGPMessageBody::Open(body))

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 // use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+// use std::task::Wake;
 // use std::sync::mpsc::{channel, Receiver};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
@@ -14,7 +15,7 @@ use tokio::time::{sleep, Duration};
 // use tokio_stream::StreamExt;
 // use tokio_util::codec::Framed;
 
-// use crate::bgp;
+use crate::bgp;
 use crate::config;
 use crate::fib;
 use crate::neighbor;
@@ -33,6 +34,7 @@ pub struct BGPSpeaker {
     pub hold_time: u16,
     local_ip: Ipv4Addr,
     local_port: u16,
+    families: Vec<bgp::AddressFamily>,
     pub rib: rib::Rib,
     pub ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
     pub neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
@@ -45,6 +47,7 @@ impl BGPSpeaker {
         hold_time: u16,
         local_ip: Ipv4Addr,
         local_port: u16,
+        families: Vec<bgp::AddressFamily>,
     ) -> Self {
         BGPSpeakerBuilder::default()
             .local_asn(local_asn)
@@ -52,6 +55,7 @@ impl BGPSpeaker {
             .hold_time(hold_time)
             .local_ip(local_ip)
             .local_port(local_port)
+            .families(families)
             .rib(HashMap::new())
             .ribtx(None)
             .neighbors(vec![])
@@ -68,9 +72,10 @@ impl BGPSpeaker {
             config.ip.parse().unwrap(),
             config.port,
             config.asn,
-            config.holdtime.unwrap(),
-            config.connect_retry,
+            config.hold_time.unwrap(),
+            config.connect_retry.unwrap(),
             neighbor::BGPState::Idle,
+            config.families,
             ribtx,
         )));
         self.neighbors.push(n);
@@ -89,14 +94,15 @@ impl BGPSpeaker {
             let asn = 0;
             let port = addr.port();
             let hold_time = s.hold_time;
-            // for neighbor in s.neighbors.clone() {
-            //     let n = neighbor.lock().await;
-            //     if addr.ip() == n.remote_ip {
-            //         asn = n.remote_asn;
-            //         port = n.remote_port;
-            //         hold_time = n.attributes.hold_time;
-            //     }
-            // }
+            let connect_retry_time = 120; // This is a default value
+                                          // for neighbor in s.neighbors.clone() {
+                                          //     let n = neighbor.lock().await;
+                                          //     if addr.ip() == n.remote_ip {
+                                          //         asn = n.remote_asn;
+                                          //         port = n.remote_port;
+                                          //         hold_time = n.attributes.hold_time;
+                                          //     }
+                                          // }
             {
                 let speaker = speaker.lock().await;
                 // let ribtx = speaker.ribtx.clone();
@@ -105,8 +111,9 @@ impl BGPSpeaker {
                     port,
                     asn,
                     hold_time,
-                    None,
+                    connect_retry_time,
                     neighbor::BGPState::Active,
+                    Some(speaker.families.clone()),
                     speaker.ribtx.clone(),
                 )));
             }
