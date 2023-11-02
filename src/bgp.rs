@@ -151,7 +151,7 @@ pub struct BGPOpenMessage {
     pub hold_time: u16,
     pub router_id: u32,
     // opt_param_length: u8,
-    pub opt_params: Vec<u8>,
+    pub opt_params: BGPOptionalParameters,
 }
 
 impl fmt::Display for BGPOpenMessage {
@@ -171,12 +171,14 @@ impl fmt::Display for BGPOpenMessage {
 impl Into<Vec<u8>> for BGPOpenMessage {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
+        let len = self.opt_params.len;
+        let opt_params: Vec<u8> = self.opt_params.into();
         buf.write(&vec![self.version.clone()]).unwrap();
         buf.write_u16::<BigEndian>(self.asn).unwrap();
         buf.write_u16::<BigEndian>(self.hold_time).unwrap();
         buf.write_u32::<BigEndian>(self.router_id).unwrap();
-        buf.write(&vec![self.opt_params.len() as u8]).unwrap();
-        buf.write(&self.opt_params).unwrap();
+        buf.write(&vec![len as u8]).unwrap();
+        buf.write(&opt_params).unwrap();
         buf.into_inner()
     }
 }
@@ -203,13 +205,15 @@ impl From<Vec<u8>> for BGPOpenMessage {
         // let opt_len = u8::from_be_bytes(opt_len);
 
         // let tlen = src.len();
+        //
+        let opt: BGPOptionalParameters = src[10..].to_vec().into();
 
         BGPOpenMessageBuilder::default()
             .version(version)
             .asn(asn)
             .hold_time(hold)
             .router_id(rid)
-            .opt_params(src[10..].to_vec())
+            .opt_params(opt)
             .build()
             .unwrap()
     }
@@ -217,7 +221,7 @@ impl From<Vec<u8>> for BGPOpenMessage {
 
 impl BGPOpenMessage {
     pub fn byte_len(&self) -> usize {
-        self.opt_params.len() + 10 * size_of::<u16>()
+        self.opt_params.len + 10 * size_of::<u16>()
     }
 
     pub fn new(
@@ -226,12 +230,15 @@ impl BGPOpenMessage {
         hold: u16,
         families: Option<Vec<AddressFamily>>,
     ) -> Result<BGPOpenMessage, String> {
-        let opt: Vec<u8> = match families {
-            None => BGPOptionalParameter::default().into(),
+        // let opt: Vec<u8> = match families {
+        let params: Vec<BGPOptionalParameter> = match families {
+            // None => BGPOptionalParameter::default().into(),
+            None => vec![BGPOptionalParameter::default()],
             Some(families) => {
-                let mut opt: Vec<u8> = vec![];
+                // let mut opt: Vec<u8> = vec![];
+                let mut caps: Vec<BGPCapability> = vec![];
                 for fam in families {
-                    let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+                    let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
                         afi: fam.afi,
                         safi: fam.safi,
                     };
@@ -239,17 +246,22 @@ impl BGPOpenMessage {
                         capability_code: BGPCapabilityCode::Multiprotocol,
                         capability_value: cv.into(),
                     };
-                    let pc: Vec<u8> = pc.into();
-                    opt.extend(pc);
+                    caps.push(pc);
                 }
+                let a: Vec<Vec<u8>> = caps.into_iter().map(|x| x.into()).collect();
                 let o = BGPOptionalParameter {
                     param_type: BGPOptionalParameterType::Capability,
-                    param_value: opt,
+                    param_value: a.into_iter().flatten().collect(),
                 };
-                o.into()
+                vec![o]
             }
         };
         // let opt: Vec<u8> = BGPOptionalParameter::default().into();
+        let mut len = 0;
+        for p in params.clone() {
+            len += 1 + p.param_value[1] as usize;
+        }
+        let opt = BGPOptionalParameters { len, params };
         BGPOpenMessageBuilder::default()
             .version(VERSION)
             .asn(asn)
@@ -260,7 +272,7 @@ impl BGPOpenMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BGPOptionalParameter {
     param_type: BGPOptionalParameterType,
     // param_length: u8,
@@ -269,7 +281,7 @@ pub struct BGPOptionalParameter {
 
 impl Default for BGPOptionalParameter {
     fn default() -> Self {
-        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+        let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
             afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
@@ -307,10 +319,60 @@ impl Into<Vec<u8>> for BGPOptionalParameter {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BGPOptionalParameters {
+    len: usize,
+    params: Vec<BGPOptionalParameter>,
+}
+
+impl Default for BGPOptionalParameters {
+    fn default() -> Self {
+        let p: BGPOptionalParameter = BGPOptionalParameter::default();
+        BGPOptionalParameters {
+            len: p.param_value[1] as usize + 1,
+            params: vec![p],
+        }
+    }
+}
+
+impl Into<Vec<u8>> for BGPOptionalParameters {
+    fn into(self) -> Vec<u8> {
+        let mut buf = Cursor::new(vec![]);
+        buf.write(&vec![self.len.clone() as u8]).unwrap();
+        buf.into_inner()
+    }
+}
+
+impl From<Vec<u8>> for BGPOptionalParameters {
+    fn from(src: Vec<u8>) -> Self {
+        let mut len = [0u8; 1];
+        len.copy_from_slice(&src[0..1]);
+        let len = u8::from_be_bytes(len);
+
+        let mut wd: Vec<BGPOptionalParameter> = vec![];
+        let mut used = 0;
+        let mut i = 1;
+
+        while len > used {
+            let mut optlen = [0u8; 1];
+            optlen.copy_from_slice(&src[i + 1..i + 2]);
+            let optlen = u8::from_be_bytes(optlen);
+            let end: usize = optlen as usize + 2;
+
+            let n: BGPOptionalParameter = src[i..(i + end)].to_vec().into();
+            // println!("WD : {:?}", n);
+            wd.push(n.clone());
+            used += optlen + 2;
+            i += optlen as usize + 2;
+        }
+        BGPOptionalParameters { len: i, params: wd }
+    }
+}
+
 #[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
 enum BGPOptionalParameterType {
-    Authentication = 1,
+    Authentication = 1, // deprecated
     Capability = 2,
 }
 
@@ -349,15 +411,39 @@ impl Into<Vec<u8>> for BGPCapability {
 #[repr(u8)]
 enum BGPCapabilityCode {
     Multiprotocol = 1,
+    RouteRefresh = 2,
+    OutboundRouteFiltering = 3,
+    GracefulRestart = 64,
+    FourOctectASN = 65,
 }
 
 #[derive(Debug)]
-pub struct BGPMultiprotocolCapability {
+pub struct BGPCapabilityMultiprotocol {
     afi: AFI,
     safi: SAFI,
 }
 
-impl Into<Vec<u8>> for BGPMultiprotocolCapability {
+#[derive(Debug)]
+pub struct BGPCapabilityRouteRefresh {
+    supported: bool,
+}
+
+#[derive(Debug)]
+pub struct BGPCapabilityOutboundRouteFiltering {
+    supported: bool,
+}
+
+#[derive(Debug)]
+pub struct BGPCapabilityGracefulRestart {
+    supported: bool,
+}
+
+#[derive(Debug)]
+pub struct BGPCapabilityFourOctectASN {
+    supported: bool,
+}
+
+impl Into<Vec<u8>> for BGPCapabilityMultiprotocol {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
         buf.write_u16::<BigEndian>(self.afi as u16).unwrap();
@@ -1197,7 +1283,7 @@ mod tests {
     #[test]
     fn test_opt_params() {
         let mut plist: Vec<BGPOptionalParameter> = vec![];
-        let cv: BGPMultiprotocolCapability = BGPMultiprotocolCapability {
+        let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
             afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
