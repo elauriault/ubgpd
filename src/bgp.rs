@@ -238,20 +238,24 @@ impl BGPOpenMessage {
                 // let mut opt: Vec<u8> = vec![];
                 let mut caps: Vec<BGPCapability> = vec![];
                 for fam in families {
-                    let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
+                    let mp: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
                         afi: fam.afi,
                         safi: fam.safi,
                     };
+                    let mp: Vec<u8> = mp.into();
                     let pc: BGPCapability = BGPCapability {
                         capability_code: BGPCapabilityCode::Multiprotocol,
-                        capability_value: cv.into(),
+                        capability_length: mp.len(),
+                        capability_value: mp,
                     };
                     caps.push(pc);
                 }
-                let a: Vec<Vec<u8>> = caps.into_iter().map(|x| x.into()).collect();
+                let caps: Vec<Vec<u8>> = caps.into_iter().map(|x| x.into()).collect();
+                let caps: Vec<u8> = caps.into_iter().flatten().collect();
                 let o = BGPOptionalParameter {
                     param_type: BGPOptionalParameterType::Capability,
-                    param_value: a.into_iter().flatten().collect(),
+                    param_length: caps.len(),
+                    param_value: caps,
                 };
                 vec![o]
             }
@@ -276,7 +280,7 @@ impl BGPOpenMessage {
 #[derive(Debug, Clone)]
 pub struct BGPOptionalParameter {
     param_type: BGPOptionalParameterType,
-    // param_length: u8,
+    param_length: usize,
     param_value: Vec<u8>,
 }
 
@@ -286,13 +290,17 @@ impl Default for BGPOptionalParameter {
             afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
+        let cv: Vec<u8> = cv.into();
         let pc: BGPCapability = BGPCapability {
             capability_code: BGPCapabilityCode::Multiprotocol,
-            capability_value: cv.into(),
+            capability_length: cv.len(),
+            capability_value: cv,
         };
+        let pc: Vec<u8> = pc.into();
         BGPOptionalParameter {
             param_type: BGPOptionalParameterType::Capability,
-            param_value: pc.into(),
+            param_length: pc.len(),
+            param_value: pc,
         }
     }
 }
@@ -303,8 +311,13 @@ impl From<Vec<u8>> for BGPOptionalParameter {
         ptype.copy_from_slice(&src[0..1]);
         let ptype = u8::from_be_bytes(ptype);
 
+        let mut plen = [0u8; 1];
+        plen.copy_from_slice(&src[0..1]);
+        let plen = u8::from_be_bytes(plen);
+
         BGPOptionalParameter {
             param_type: BGPOptionalParameterType::from_u8(ptype).unwrap(),
+            param_length: plen as usize,
             param_value: src[2..].to_vec(),
         }
     }
@@ -385,7 +398,7 @@ enum BGPOptionalParameterType {
 #[derive(Debug)]
 pub struct BGPCapability {
     capability_code: BGPCapabilityCode,
-    // param_length: u8,
+    capability_length: usize,
     capability_value: Vec<u8>,
 }
 
@@ -397,6 +410,7 @@ impl From<Vec<u8>> for BGPCapability {
 
         BGPCapability {
             capability_code: BGPCapabilityCode::from_u8(code).unwrap(),
+            capability_length: src[2..].to_vec().len(),
             capability_value: src[2..].to_vec(),
         }
     }
@@ -407,7 +421,8 @@ impl Into<Vec<u8>> for BGPCapability {
         let mut buf = Cursor::new(vec![]);
         buf.write(&vec![self.capability_code.clone() as u8])
             .unwrap();
-        buf.write(&vec![self.capability_value.len() as u8]).unwrap();
+        // buf.write(&vec![self.capability_value.len() as u8]).unwrap();
+        buf.write(&vec![self.capability_length as u8]).unwrap();
         buf.write(&self.capability_value).unwrap();
         buf.into_inner()
     }
@@ -1293,13 +1308,17 @@ mod tests {
             afi: AFI::Ipv4,
             safi: SAFI::NLRIUnicast,
         };
+        let cv: Vec<u8> = cv.into();
         let pc: BGPCapability = BGPCapability {
             capability_code: BGPCapabilityCode::Multiprotocol,
-            capability_value: cv.try_into().unwrap(),
+            capability_length: cv.len(),
+            capability_value: cv,
         };
+        let pc: Vec<u8> = pc.into();
         let p1: BGPOptionalParameter = BGPOptionalParameter {
             param_type: BGPOptionalParameterType::Capability,
-            param_value: pc.try_into().unwrap(),
+            param_length: pc.len(),
+            param_value: pc,
         };
 
         plist.push(p1);
