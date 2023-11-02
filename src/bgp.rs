@@ -339,8 +339,12 @@ impl Into<Vec<u8>> for BGPOptionalParameters {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
         buf.write(&vec![self.len.clone() as u8]).unwrap();
+        for p in self.params {
+            let p: Vec<u8> = p.into();
+            buf.write(&p).unwrap();
+        }
         // Need to add self.params[]
-        // buf.into_inner()
+        buf.into_inner()
     }
 }
 
