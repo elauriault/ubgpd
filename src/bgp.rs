@@ -259,7 +259,8 @@ impl BGPOpenMessage {
         // let opt: Vec<u8> = BGPOptionalParameter::default().into();
         let mut len = 0;
         for p in params.clone() {
-            len += 1 + p.param_value[1] as usize;
+            len += 2;
+            len += p.param_value[1] as usize;
         }
         let opt = BGPOptionalParameters { len, params };
         BGPOpenMessageBuilder::default()
