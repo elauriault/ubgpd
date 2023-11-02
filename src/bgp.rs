@@ -177,7 +177,7 @@ impl Into<Vec<u8>> for BGPOpenMessage {
         buf.write_u16::<BigEndian>(self.asn).unwrap();
         buf.write_u16::<BigEndian>(self.hold_time).unwrap();
         buf.write_u32::<BigEndian>(self.router_id).unwrap();
-        buf.write(&vec![len as u8]).unwrap();
+        // buf.write(&vec![len as u8]).unwrap();
         buf.write(&opt_params).unwrap();
         buf.into_inner()
     }
@@ -206,7 +206,7 @@ impl From<Vec<u8>> for BGPOpenMessage {
 
         // let tlen = src.len();
         //
-        let opt: BGPOptionalParameters = src[10..].to_vec().into();
+        let opt: BGPOptionalParameters = src[9..].to_vec().into();
 
         BGPOpenMessageBuilder::default()
             .version(version)
@@ -261,12 +261,7 @@ impl BGPOpenMessage {
             }
         };
         // let opt: Vec<u8> = BGPOptionalParameter::default().into();
-        let mut len = 0;
-        for p in params.clone() {
-            len += 2;
-            len += p.param_value[1] as usize;
-        }
-        let opt = BGPOptionalParameters { len, params };
+        let opt = BGPOptionalParameters::new(params);
         BGPOpenMessageBuilder::default()
             .version(VERSION)
             .asn(asn)
@@ -312,9 +307,11 @@ impl From<Vec<u8>> for BGPOptionalParameter {
         let ptype = u8::from_be_bytes(ptype);
 
         let mut plen = [0u8; 1];
-        plen.copy_from_slice(&src[0..1]);
+        plen.copy_from_slice(&src[1..2]);
         let plen = u8::from_be_bytes(plen);
 
+        println!("ptype : {:?}", ptype);
+        println!("plen : {:?}", plen);
         BGPOptionalParameter {
             param_type: BGPOptionalParameterType::from_u8(ptype).unwrap(),
             param_length: plen as usize,
@@ -339,6 +336,17 @@ pub struct BGPOptionalParameters {
     params: Vec<BGPOptionalParameter>,
 }
 
+impl BGPOptionalParameters {
+    fn new(params: Vec<BGPOptionalParameter>) -> BGPOptionalParameters {
+        let mut len = 0;
+        for p in params.clone() {
+            len += 2;
+            len += p.param_length as usize;
+        }
+        BGPOptionalParameters { len, params }
+    }
+}
+
 impl Default for BGPOptionalParameters {
     fn default() -> Self {
         let p: BGPOptionalParameter = BGPOptionalParameter::default();
@@ -358,6 +366,7 @@ impl Into<Vec<u8>> for BGPOptionalParameters {
             buf.write(&p).unwrap();
         }
         // Need to add self.params[]
+        println!("buf : {:?}", buf);
         buf.into_inner()
     }
 }
@@ -372,11 +381,14 @@ impl From<Vec<u8>> for BGPOptionalParameters {
         let mut used = 0;
         let mut i = 1;
 
+        println!("src is {:?}", src);
         while len > used {
+            println!("len: {:?} used : {:?},  i : {:?}", len, used, i);
             let mut optlen = [0u8; 1];
             optlen.copy_from_slice(&src[i + 1..i + 2]);
             let optlen = u8::from_be_bytes(optlen);
             let end: usize = optlen as usize + 2;
+            println!("optlen : {:?},  end : {:?}", used, i);
 
             let n: BGPOptionalParameter = src[i..(i + end)].to_vec().into();
             // println!("WD : {:?}", n);
