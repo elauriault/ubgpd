@@ -152,7 +152,6 @@ pub struct BGPOpenMessage {
     pub asn: u16,
     pub hold_time: u16,
     pub router_id: u32,
-    // opt_param_length: u8,
     pub opt_params: BGPOptionalParameters,
 }
 
@@ -404,9 +403,9 @@ enum BGPOptionalParameterType {
 
 #[derive(Debug, Clone)]
 pub struct BGPCapability {
-    capability_code: BGPCapabilityCode,
-    capability_length: usize,
-    capability_value: Vec<u8>,
+    pub capability_code: BGPCapabilityCode,
+    pub capability_length: usize,
+    pub capability_value: Vec<u8>,
 }
 
 impl From<Vec<u8>> for BGPCapability {
@@ -437,7 +436,7 @@ impl Into<Vec<u8>> for BGPCapability {
 
 #[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
-enum BGPCapabilityCode {
+pub enum BGPCapabilityCode {
     Multiprotocol = 1,
     RouteRefresh = 2,
     OutboundRouteFiltering = 3,
@@ -449,26 +448,6 @@ enum BGPCapabilityCode {
 pub struct BGPCapabilityMultiprotocol {
     afi: AFI,
     safi: SAFI,
-}
-
-#[derive(Debug)]
-pub struct BGPCapabilityRouteRefresh {
-    supported: bool,
-}
-
-#[derive(Debug)]
-pub struct BGPCapabilityOutboundRouteFiltering {
-    supported: bool,
-}
-
-#[derive(Debug)]
-pub struct BGPCapabilityGracefulRestart {
-    supported: bool,
-}
-
-#[derive(Debug)]
-pub struct BGPCapabilityFourOctectASN {
-    supported: bool,
 }
 
 impl Into<Vec<u8>> for BGPCapabilityMultiprotocol {
@@ -484,7 +463,7 @@ impl Into<Vec<u8>> for BGPCapabilityMultiprotocol {
 #[derive(Debug, Clone, Default)]
 pub struct BGPCapabilities {
     len: usize,
-    params: Vec<BGPCapability>,
+    pub params: Vec<BGPCapability>,
 }
 
 impl From<BGPOptionalParameters> for BGPCapabilities {

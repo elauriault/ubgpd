@@ -16,7 +16,7 @@ use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::bgp;
+use crate::bgp::{self, BGPCapabilities};
 // use crate::config;
 // use crate::fib;
 use crate::rib;
@@ -119,28 +119,20 @@ pub struct Capabilities {
     pub four_octect_asn: Option<u32>,
 }
 
-impl From<Vec<u8>> for Capabilities {
-    fn from(src: Vec<u8>) -> Self {
-        let mut i = 0;
-        let end = src.len();
+impl From<bgp::BGPCapabilities> for Capabilities {
+    fn from(src: bgp::BGPCapabilities) -> Self {
         let mut capabilities = Capabilities::default();
         let mut afs = vec![];
-        while i < end {
-            let mut t = [0u8; 1];
-            let mut l = [0u8; 1];
-            t.copy_from_slice(&src[i..i + 1]);
-            l.copy_from_slice(&src[i + 1..i + 2]);
-            let t = u8::from_be_bytes(t);
-            let l = u8::from_be_bytes(l);
-            match t {
-                1 => {
-                    if l != 4 {
+        for c in src.params {
+            match c.capability_code {
+                bgp::BGPCapabilityCode::Multiprotocol => {
+                    if c.capability_length != 4 {
                         panic!("Unexpected length of BGP capability");
                     }
                     let mut afi = [0u8; 2];
                     let mut safi = [0u8; 1];
-                    afi.copy_from_slice(&src[i + 2..i + 4]);
-                    safi.copy_from_slice(&src[i + 5..i + 6]);
+                    afi.copy_from_slice(&c.capability_value[0..2]);
+                    safi.copy_from_slice(&c.capability_value[3..4]);
                     let afi = u16::from_be_bytes(afi);
                     let safi = u8::from_be_bytes(safi);
                     let afi = FromPrimitive::from_u16(afi).unwrap();
@@ -148,22 +140,22 @@ impl From<Vec<u8>> for Capabilities {
                     let af = bgp::AddressFamily { afi, safi };
                     afs.push(af);
                 }
-                2 => capabilities.route_refresh = true,
-                3 => capabilities.outbound_route_filtering = true,
-                64 => capabilities.graceful_restart = true,
-                65 => {
-                    if l != 4 {
+                bgp::BGPCapabilityCode::RouteRefresh => capabilities.route_refresh = true,
+                bgp::BGPCapabilityCode::OutboundRouteFiltering => {
+                    capabilities.outbound_route_filtering = true
+                }
+                bgp::BGPCapabilityCode::GracefulRestart => capabilities.graceful_restart = true,
+                bgp::BGPCapabilityCode::FourOctectASN => {
+                    if c.capability_length != 4 {
                         panic!("Unexpected length of BGP capability");
                     }
                     let mut v = [0u8; 4];
-                    v.copy_from_slice(&src[i + 2..i + 6]);
-                    let mut asn = u32::from_be_bytes(v);
+                    v.copy_from_slice(&c.capability_value);
+                    let asn = u32::from_be_bytes(v);
                     capabilities.four_octect_asn = Some(asn);
                 }
                 _ => {}
             }
-
-            i += 2 + l as usize;
         }
         capabilities.multiprotocol = Some(afs.into_iter().unique().collect());
 
@@ -1000,7 +992,9 @@ impl BGPNeighbor {
         n.attributes.hold_time = message.hold_time;
         n.router_id = message.router_id;
         n.attributes.state = BGPState::OpenConfirm;
-        // println!("Neighbor updated : {:?}", n);
+        let caps: bgp::BGPCapabilities = message.opt_params.into();
+        n.capabilities_received = caps.into();
+        println!("Neighbor updated from Open : {:?}", n);
     }
 
     async fn send_open(
