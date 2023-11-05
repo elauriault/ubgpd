@@ -1,5 +1,7 @@
 use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
+use itertools::Itertools;
+use num_traits::FromPrimitive;
 // use futures::TryFutureExt;
 // use std::collections::HashMap;
 use std::error::Error;
@@ -101,10 +103,84 @@ pub struct BGPNeighbor {
     pub remote_asn: u16,
     pub router_id: u32,
     // connect_retry_time: Option<u16>,
-    families: Option<Vec<bgp::AddressFamily>>,
+    capabilities_advertised: Capabilities,
+    capabilities_received: Capabilities,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
     ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     attributes: BGPSessionAttributes,
+}
+
+#[derive(Debug, Clone)]
+pub struct Capabilities {
+    pub multiprotocol: Option<Vec<bgp::AddressFamily>>,
+    pub route_refresh: bool,
+    pub outbound_route_filtering: bool,
+    pub graceful_restart: bool,
+    pub four_octect_asn: Option<u32>,
+}
+
+impl From<Vec<u8>> for Capabilities {
+    fn from(src: Vec<u8>) -> Self {
+        let mut i = 0;
+        let end = src.len();
+        let mut capabilities = Capabilities::default();
+        let mut afs = vec![];
+        while i < end {
+            let mut t = [0u8; 1];
+            let mut l = [0u8; 1];
+            t.copy_from_slice(&src[i..i + 1]);
+            l.copy_from_slice(&src[i + 1..i + 2]);
+            let t = u8::from_be_bytes(t);
+            let l = u8::from_be_bytes(l);
+            match t {
+                1 => {
+                    if l != 4 {
+                        panic!("Unexpected length of BGP capability");
+                    }
+                    let mut afi = [0u8; 2];
+                    let mut safi = [0u8; 1];
+                    afi.copy_from_slice(&src[i + 2..i + 4]);
+                    safi.copy_from_slice(&src[i + 5..i + 6]);
+                    let afi = u16::from_be_bytes(afi);
+                    let safi = u8::from_be_bytes(safi);
+                    let afi = FromPrimitive::from_u16(afi).unwrap();
+                    let safi = FromPrimitive::from_u8(safi).unwrap();
+                    let af = bgp::AddressFamily { afi, safi };
+                    afs.push(af);
+                }
+                2 => capabilities.route_refresh = true,
+                3 => capabilities.outbound_route_filtering = true,
+                64 => capabilities.graceful_restart = true,
+                65 => {
+                    if l != 4 {
+                        panic!("Unexpected length of BGP capability");
+                    }
+                    let mut v = [0u8; 4];
+                    v.copy_from_slice(&src[i + 2..i + 6]);
+                    let mut asn = u32::from_be_bytes(v);
+                    capabilities.four_octect_asn = Some(asn);
+                }
+                _ => {}
+            }
+
+            i += 2 + l as usize;
+        }
+        capabilities.multiprotocol = Some(afs.into_iter().unique().collect());
+
+        capabilities
+    }
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Capabilities {
+            multiprotocol: None,
+            route_refresh: false,
+            outbound_route_filtering: false,
+            graceful_restart: false,
+            four_octect_asn: None,
+        }
+    }
 }
 
 impl BGPNeighbor {
@@ -127,13 +203,15 @@ impl BGPNeighbor {
             .allow_automatic_start(true)
             .build()
             .unwrap();
+        let mut capabilities_advertised = Capabilities::default();
+        capabilities_advertised.multiprotocol = families;
         BGPNeighbor {
             remote_ip,
             remote_port,
             remote_asn,
             router_id: 0,
-            // connect_retry_time,
-            families,
+            capabilities_advertised,
+            capabilities_received: Capabilities::default(),
             tx,
             ribtx,
             attributes,
@@ -416,7 +494,7 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
-                let families;
+                let capabilities;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
@@ -425,9 +503,9 @@ impl BGPNeighbor {
                 }
                 {
                     let n = nb.lock().await;
-                    families = n.families.clone();
+                    capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
                 {
@@ -465,7 +543,7 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
-                let families;
+                let capabilities;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
@@ -474,9 +552,9 @@ impl BGPNeighbor {
                 }
                 {
                     let n = nb.lock().await;
-                    families = n.families.clone();
+                    capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
                 {
@@ -547,7 +625,7 @@ impl BGPNeighbor {
                 let asn;
                 let rid;
                 let hold;
-                let families;
+                let capabilities;
                 {
                     let s = s.lock().await;
                     asn = s.local_asn;
@@ -556,9 +634,9 @@ impl BGPNeighbor {
                 }
                 {
                     let n = nb.lock().await;
-                    families = n.families.clone();
+                    capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, families)
+                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
             }
@@ -930,9 +1008,9 @@ impl BGPNeighbor {
         asn: u16,
         rid: u32,
         hold: u16,
-        families: Option<Vec<bgp::AddressFamily>>,
+        capabilities: Capabilities,
     ) -> Result<(), Box<dyn Error>> {
-        let body = bgp::BGPOpenMessage::new(asn, rid, hold, families).unwrap();
+        let body = bgp::BGPOpenMessage::new(asn, rid, hold, capabilities).unwrap();
         println!("open :{:?}", body);
         let message: Vec<u8> =
             bgp::Message::new(bgp::MessageType::OPEN, bgp::BGPMessageBody::Open(body))

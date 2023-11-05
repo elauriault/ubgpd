@@ -19,6 +19,8 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tokio_util::codec::{Decoder, Encoder};
 
+use crate::neighbor;
+
 const MARKER: [u8; 16] = [0xff; 16];
 const VERSION: u8 = 4;
 const MAX: usize = 4096;
@@ -55,21 +57,21 @@ pub enum BGPError {
     IOError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u8)]
 pub enum AFI {
     Ipv4 = 1,
     Ipv6,
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u8)]
 pub enum SAFI {
     NLRIUnicast = 1,
     NLRIMulticast,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AddressFamily {
     pub afi: AFI,
     pub safi: SAFI,
@@ -228,9 +230,10 @@ impl BGPOpenMessage {
         asn: u16,
         rid: u32,
         hold: u16,
-        families: Option<Vec<AddressFamily>>,
+        capabilities: neighbor::Capabilities,
     ) -> Result<BGPOpenMessage, String> {
         // let opt: Vec<u8> = match families {
+        let families = capabilities.multiprotocol;
         let params: Vec<BGPOptionalParameter> = match families {
             // None => BGPOptionalParameter::default().into(),
             None => vec![BGPOptionalParameter::default()],
@@ -310,8 +313,6 @@ impl From<Vec<u8>> for BGPOptionalParameter {
         plen.copy_from_slice(&src[1..2]);
         let plen = u8::from_be_bytes(plen);
 
-        println!("ptype : {:?}", ptype);
-        println!("plen : {:?}", plen);
         BGPOptionalParameter {
             param_type: BGPOptionalParameterType::from_u8(ptype).unwrap(),
             param_length: plen as usize,
@@ -365,8 +366,6 @@ impl Into<Vec<u8>> for BGPOptionalParameters {
             let p: Vec<u8> = p.into();
             buf.write(&p).unwrap();
         }
-        // Need to add self.params[]
-        println!("buf : {:?}", buf);
         buf.into_inner()
     }
 }
@@ -381,17 +380,13 @@ impl From<Vec<u8>> for BGPOptionalParameters {
         let mut used = 0;
         let mut i = 1;
 
-        println!("src is {:?}", src);
         while len > used {
-            println!("len: {:?} used : {:?},  i : {:?}", len, used, i);
             let mut optlen = [0u8; 1];
             optlen.copy_from_slice(&src[i + 1..i + 2]);
             let optlen = u8::from_be_bytes(optlen);
             let end: usize = optlen as usize + 2;
-            println!("optlen : {:?},  end : {:?}", used, i);
 
             let n: BGPOptionalParameter = src[i..(i + end)].to_vec().into();
-            // println!("WD : {:?}", n);
             wd.push(n.clone());
             used += optlen + 2;
             i += optlen as usize + 2;
@@ -400,14 +395,14 @@ impl From<Vec<u8>> for BGPOptionalParameters {
     }
 }
 
-#[derive(Debug, Clone, FromPrimitive)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq)]
 #[repr(u8)]
 enum BGPOptionalParameterType {
     Authentication = 1, // deprecated
     Capability = 2,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BGPCapability {
     capability_code: BGPCapabilityCode,
     capability_length: usize,
@@ -483,6 +478,58 @@ impl Into<Vec<u8>> for BGPCapabilityMultiprotocol {
         buf.write_u8(0).unwrap();
         buf.write(&vec![self.safi as u8]).unwrap();
         buf.into_inner()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BGPCapabilities {
+    len: usize,
+    params: Vec<BGPCapability>,
+}
+
+impl From<BGPOptionalParameters> for BGPCapabilities {
+    fn from(src: BGPOptionalParameters) -> Self {
+        let p = src
+            .params
+            .iter()
+            .find(|x| x.param_type == BGPOptionalParameterType::Capability);
+        match p {
+            None => BGPCapabilities::default(),
+            Some(v) => {
+                let src = &v.param_value;
+                let mut i = 0;
+                let end = src.len();
+                let mut caps = vec![];
+                while i < end {
+                    let mut t = [0u8; 1];
+                    let mut l = [0u8; 1];
+                    t.copy_from_slice(&src[i..i + 1]);
+                    l.copy_from_slice(&src[i + 1..i + 2]);
+                    let t = u8::from_be_bytes(t);
+                    let t = FromPrimitive::from_u8(t).unwrap();
+                    let l = u8::from_be_bytes(l);
+                    let mut v = vec![];
+
+                    if l > 0 {
+                        v.extend_from_slice(&src[i + 2..i + 2 + l as usize]);
+                    }
+
+                    let c = BGPCapability {
+                        capability_code: t,
+                        capability_length: l as usize,
+                        capability_value: v,
+                    };
+
+                    caps.push(c);
+
+                    i += 2 + l as usize;
+                }
+                BGPCapabilities {
+                    len: v.param_length,
+                    params: caps,
+                }
+            }
+        }
     }
 }
 
@@ -1366,7 +1413,7 @@ mod tests {
     }
     #[test]
     fn test_open_message() {
-        let body = BGPOpenMessage::new(123, 345, 3, None).unwrap();
+        let body = BGPOpenMessage::new(123, 345, 3, neighbor::Capabilities::default()).unwrap();
         let test_msg: Vec<u8> = Message::new(MessageType::OPEN, BGPMessageBody::Open(body))
             .unwrap()
             .try_into()
