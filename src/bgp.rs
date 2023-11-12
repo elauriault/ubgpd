@@ -3,15 +3,17 @@ use byteorder::{BigEndian, WriteBytesExt};
 use bytes::{Buf, BytesMut};
 use ipnet::IpNet;
 use ipnet::Ipv4Net;
+use ipnet::Ipv6Net;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde_derive::Deserialize;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 // use std::convert::TryInto;
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::result::Result;
 use std::{error::Error, fmt};
 use thiserror::Error;
@@ -58,7 +60,7 @@ pub enum BGPError {
 }
 
 #[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
-#[repr(u8)]
+#[repr(u16)]
 pub enum AFI {
     Ipv4 = 1,
     Ipv6,
@@ -172,7 +174,7 @@ impl fmt::Display for BGPOpenMessage {
 impl Into<Vec<u8>> for BGPOpenMessage {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
-        let len = self.opt_params.len;
+        // let len = self.opt_params.len;
         let opt_params: Vec<u8> = self.opt_params.into();
         buf.write(&vec![self.version.clone()]).unwrap();
         buf.write_u16::<BigEndian>(self.asn).unwrap();
@@ -575,7 +577,13 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         let mut i = 2;
 
         while wdl > used {
-            let n: NLRI = src[i..i + 4].to_vec().into();
+            let plen = src[i];
+            let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+            let buf = Ipv4Octets {
+                octets: src[i..end].to_vec(),
+            };
+            let n: NLRI = buf.into();
+            // let n: NLRI = src[i..i + 4].to_vec().into();
             // println!("WD : {:?}", n);
             wd.push(n.clone());
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
@@ -608,7 +616,13 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         let mut routes: Vec<NLRI> = vec![];
         while i < total_len {
             // println!("i : {:?}", i);
-            let n: NLRI = src[i..].to_vec().into();
+            let plen = src[i];
+            let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+            let buf = Ipv4Octets {
+                octets: src[i..end].to_vec(),
+            };
+            let n: NLRI = buf.into();
+            // let n: NLRI = src[i..end].to_vec().into();
             // println!("NLRI : {:?}", n);
             routes.push(n.clone());
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
@@ -630,12 +644,13 @@ pub struct PathAttribute {
     transitive: bool,
     partial: bool,
     extended_length: bool,
-    type_code: PathAttributeType,
+    pub type_code: PathAttributeType,
     pub value: PathAttributeValue,
 }
 
 impl From<Vec<u8>> for PathAttribute {
     fn from(src: Vec<u8>) -> Self {
+        // println!("\nsrc : {:?}", src);
         let mask = src[0];
 
         // println!("mask is {:#x}", mask);
@@ -732,8 +747,12 @@ impl From<Vec<u8>> for PathAttribute {
             PathAttributeType::DPA => PathAttributeValue::DPA,
             PathAttributeType::Advertiser => PathAttributeValue::Advertiser,
             PathAttributeType::RcidPathClusterId => PathAttributeValue::RcidPathClusterId,
-            PathAttributeType::MPReachableNLRI => PathAttributeValue::MPReachableNLRI,
-            PathAttributeType::MPUnreachableNLRI => PathAttributeValue::MPUnreachableNLRI,
+            PathAttributeType::MPReachableNLRI => {
+                PathAttributeValue::MPReachableNLRI(src[2..].to_vec().into())
+            }
+            PathAttributeType::MPUnreachableNLRI => {
+                PathAttributeValue::MPUnreachableNLRI(src[2..].to_vec().into())
+            }
             PathAttributeType::ExtCommunities => PathAttributeValue::ExtCommunities,
         };
 
@@ -822,11 +841,15 @@ impl Into<Vec<u8>> for PathAttribute {
             PathAttributeValue::RcidPathClusterId => {
                 code = 13;
             }
-            PathAttributeValue::MPReachableNLRI => {
+            PathAttributeValue::MPReachableNLRI(value) => {
                 code = 14;
+                let v: Vec<u8> = value.into();
+                val.write(&v).unwrap();
             }
-            PathAttributeValue::MPUnreachableNLRI => {
+            PathAttributeValue::MPUnreachableNLRI(value) => {
                 code = 15;
+                let v: Vec<u8> = value.into();
+                val.write(&v).unwrap();
             }
             PathAttributeValue::ExtCommunities => {
                 code = 16;
@@ -876,8 +899,8 @@ pub enum PathAttributeValue {
     DPA,
     Advertiser,
     RcidPathClusterId,
-    MPReachableNLRI,
-    MPUnreachableNLRI,
+    MPReachableNLRI(MPNLRI),
+    MPUnreachableNLRI(MPNLRI),
     ExtCommunities,
 }
 
@@ -941,23 +964,35 @@ pub struct AggregatorValue {
 #[derive(Builder, Debug, Clone, PartialEq, Eq, Hash)]
 #[builder(setter(into))]
 pub struct NLRI {
-    net: Ipv4Net,
+    net: IpNet,
+}
+
+pub struct Ipv4Octets {
+    octets: Vec<u8>,
+}
+
+pub struct Ipv6Octets {
+    octets: Vec<u8>,
 }
 
 impl Into<Vec<u8>> for NLRI {
     fn into(self) -> Vec<u8> {
         let mut buf = Cursor::new(vec![]);
         buf.write_u8(self.net.prefix_len()).unwrap();
-        let addr: u32 = self.net.network().into();
-        let addr = addr.to_be_bytes();
         let blen = (self.net.prefix_len() as f32 / 8.0).ceil() as usize;
-        buf.write(&addr[0..blen]).unwrap();
+        match self.net {
+            IpNet::V4(v) => {
+                let addrv4: u32 = v.network().into();
+                let addr = addrv4.to_be_bytes();
+                buf.write(&addr[0..blen]).unwrap();
+            }
+            IpNet::V6(v) => {
+                let addrv6: u128 = v.network().into();
+                let addr = addrv6.to_be_bytes();
+                buf.write(&addr[0..blen]).unwrap();
+            }
+        }
         buf.into_inner()
-    }
-}
-impl Into<Ipv4Net> for NLRI {
-    fn into(self) -> Ipv4Net {
-        self.net
     }
 }
 
@@ -967,17 +1002,189 @@ impl Into<IpNet> for NLRI {
     }
 }
 
-impl From<Vec<u8>> for NLRI {
-    fn from(src: Vec<u8>) -> Self {
-        let mut addr = src;
+impl From<Ipv4Octets> for NLRI {
+    fn from(src: Ipv4Octets) -> Self {
+        let mut addr = src.octets;
         let plen = addr.remove(0);
         // println!("plen {:?}", plen);
-        let blen = (plen as f32 / 8.0).ceil() as usize;
+        // let blen = (plen as f32 / 8.0).ceil() as usize;
         // println!("blen {:?}", blen);
-        let mut t: Vec<u8> = vec![0; 4 - blen];
-        addr.append(&mut t);
+        // let mut t: Vec<u8> = vec![0; 4 - blen];
+        // addr.append(&mut t);
+        addr.resize(4, 0);
         let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen).unwrap();
         NLRIBuilder::default().net(net).build().unwrap()
+    }
+}
+
+impl From<Ipv6Octets> for NLRI {
+    fn from(src: Ipv6Octets) -> Self {
+        let mut addr = src.octets;
+        let plen = addr.remove(0);
+        // println!("plen {:?}", plen);
+        // let blen = (plen as f32 / 8.0).ceil() as usize;
+        // println!("blen {:?}", blen);
+        // let mut t: Vec<u8> = vec![0; 4 - blen];
+        // addr.append(&mut t);
+        addr.resize(16, 0);
+        let mut addr6: Vec<u16> = vec![];
+        let mut i = 0;
+        let end = addr.len();
+        while i < end {
+            let mut bytes = [0u8; 2];
+            bytes.copy_from_slice(&addr[i..i + 2]);
+            let val = u16::from_be_bytes(bytes);
+            addr6.push(val);
+            i += 2;
+        }
+        let net = Ipv6Net::new(
+            Ipv6Addr::new(
+                addr6[0], addr6[1], addr6[2], addr6[3], addr6[4], addr6[5], addr6[6], addr6[7],
+            ),
+            plen,
+        )
+        .unwrap();
+        NLRIBuilder::default().net(net).build().unwrap()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MPNLRI {
+    pub af: AddressFamily,
+    // pub afi: AFI,
+    // pub safi: SAFI,
+    pub nh: IpAddr,
+    pub nlris: Vec<NLRI>,
+}
+
+impl Default for MPNLRI {
+    fn default() -> Self {
+        MPNLRI {
+            af: AddressFamily {
+                afi: AFI::Ipv6,
+                safi: SAFI::NLRIUnicast,
+            },
+            nh: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+            nlris: vec![],
+        }
+    }
+}
+
+impl From<Vec<u8>> for MPNLRI {
+    fn from(src: Vec<u8>) -> Self {
+        let mut src = src;
+        let total_len = src.remove(0) as usize;
+
+        let mut afi = [0u8; 2];
+        afi.copy_from_slice(&src[0..2]);
+        let afi = u16::from_be_bytes(afi);
+        let afi: AFI = FromPrimitive::from_u16(afi).unwrap();
+
+        let mut safi = [0u8; 1];
+        safi.copy_from_slice(&src[2..3]);
+        let safi = u8::from_be_bytes(safi);
+        let safi: SAFI = FromPrimitive::from_u8(safi).unwrap();
+
+        let mut nhl = [0u8; 1];
+        nhl.copy_from_slice(&src[3..4]);
+        let nhl: usize = u8::from_be_bytes(nhl).into();
+
+        let mut addr: Vec<u8> = vec![0; nhl];
+        addr.copy_from_slice(&src[4..4 + nhl]);
+
+        let nh: IpAddr;
+        let mut i = 4 + nhl + 1;
+
+        let mut nlris: Vec<NLRI> = vec![];
+        match afi {
+            AFI::Ipv4 => {
+                addr.resize(4, 0);
+                nh = IpAddr::V4(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]));
+
+                while i < total_len {
+                    let plen = src[i];
+                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let buf = Ipv4Octets {
+                        octets: src[i..end].to_vec(),
+                    };
+                    let n: NLRI = buf.into();
+                    nlris.push(n.clone());
+                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    i += blen;
+                }
+            }
+            AFI::Ipv6 => {
+                addr.resize(16, 0);
+                let mut addr6: Vec<u16> = vec![];
+                let mut j = 0;
+                let end = addr.len();
+                while j < end {
+                    let mut bytes = [0u8; 2];
+                    bytes.copy_from_slice(&addr[j..j + 2]);
+                    let val = u16::from_be_bytes(bytes);
+                    addr6.push(val);
+                    j += 2;
+                }
+                nh = IpAddr::V6(Ipv6Addr::new(
+                    addr6[0], addr6[1], addr6[2], addr6[3], addr6[4], addr6[5], addr6[6], addr6[7],
+                ));
+
+                while i < total_len {
+                    let plen = src[i];
+                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let buf = Ipv6Octets {
+                        octets: src[i..end].to_vec(),
+                    };
+                    let n: NLRI = buf.into();
+                    nlris.push(n.clone());
+                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    i += blen;
+                }
+            }
+        }
+        let af = AddressFamily { afi, safi };
+        MPNLRI {
+            af,
+            // afi,
+            // safi,
+            nh,
+            nlris,
+        }
+    }
+}
+
+impl Into<Vec<u8>> for MPNLRI {
+    fn into(self) -> Vec<u8> {
+        let mut buf = Cursor::new(vec![]);
+        let mut blen = 3;
+        buf.write(&vec![blen as u8]).unwrap();
+        buf.write_u16::<BigEndian>((self.af.afi as u16).into())
+            .unwrap();
+        buf.write(&vec![self.af.safi as u8]).unwrap();
+        match self.nh {
+            IpAddr::V4(v) => {
+                buf.write(&vec![4 as u8]).unwrap();
+                let addrv4: u32 = v.into();
+                let addr = addrv4.to_be_bytes();
+                buf.write(&addr[0..4]).unwrap();
+                blen += 5;
+            }
+            IpAddr::V6(v) => {
+                buf.write(&vec![16 as u8]).unwrap();
+                let addrv6: u128 = v.into();
+                let addr = addrv6.to_be_bytes();
+                buf.write(&addr[0..16]).unwrap();
+                blen += 17;
+            }
+        }
+        for n in self.nlris {
+            let nbuf: Vec<u8> = n.into();
+            blen += nbuf.len();
+            buf.write(&nbuf).unwrap();
+        }
+        buf.rewind().unwrap();
+        buf.write(&vec![blen as u8]).unwrap();
+        buf.into_inner()
     }
 }
 
@@ -1226,22 +1433,56 @@ mod tests {
             0x18, 0x0a, 0x0a, 0x02, 0x18, 0x0a, 0x0a, 0x03,
         ];
         let u: BGPUpdateMessage = v.into();
-        // let w: BGPUpdateMessage = {
-        //         withdrawn_routes: NLRi =[],
-        //     path_attributes: [
-        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: Origin(IGP) },
-        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: AsPath([ASPATHSegment { path_type: AsSequence, as_list: [65200, 65100] }]) },
-        //         PathAttribute { optional: false, transitive: true, partial: false, extended_length: false, value: NextHop(2.2.2.2) }
-        //     ],
-        //     nlri: [
-        //         NLRI { net: 10.10.1.24/24 },
-        //         NLRI { net: 10.10.2.24/24 },
-        //         NLRI { net: 10.10.3.0/24 }
-        // };
+        let wdr = vec![];
+        let pa: Vec<PathAttribute> = [
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::Origin,
+                value: PathAttributeValue::Origin(OriginType::IGP),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::AsPath,
+                value: PathAttributeValue::AsPath(
+                    [ASPATHSegment {
+                        path_type: ASPATHSegmentType::AsSequence,
+                        as_list: [65200, 65100].to_vec(),
+                    }]
+                    .to_vec(),
+                ),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::NextHop,
+                value: PathAttributeValue::NextHop("2.2.2.2".parse().unwrap()),
+            },
+        ]
+        .to_vec();
+        let nlri: Vec<NLRI> = [
+            NLRI {
+                net: "10.10.1.0/24".parse().unwrap(),
+            },
+            NLRI {
+                net: "10.10.2.0/24".parse().unwrap(),
+            },
+            NLRI {
+                net: "10.10.3.0/24".parse().unwrap(),
+            },
+        ]
+        .to_vec();
         let w = BGPUpdateMessageBuilder::default()
-            .withdrawn_routes(vec![])
-            .path_attributes(vec![])
-            .nlri(vec![])
+            .withdrawn_routes(wdr)
+            .path_attributes(pa)
+            .nlri(nlri)
             .build()
             .unwrap();
         assert_eq!(u, w);
@@ -1255,10 +1496,55 @@ mod tests {
             0xf2, 0x08, 0x02,
         ];
         let u: BGPUpdateMessage = v.into();
+        let pa: Vec<PathAttribute> = [
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::Origin,
+                value: PathAttributeValue::Origin(OriginType::IGP),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::AsPath,
+                value: PathAttributeValue::AsPath(
+                    [ASPATHSegment {
+                        path_type: ASPATHSegmentType::AsSequence,
+                        as_list: [200].to_vec(),
+                    }]
+                    .to_vec(),
+                ),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::NextHop,
+                value: PathAttributeValue::NextHop("10.1.12.2".parse().unwrap()),
+            },
+            PathAttribute {
+                optional: true,
+                transitive: false,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::MultiExitDisc,
+                value: PathAttributeValue::MultiExitDisc(242),
+            },
+        ]
+        .to_vec();
+        let nlri: Vec<NLRI> = [NLRI {
+            net: "2.0.0.0/8".parse().unwrap(),
+        }]
+        .to_vec();
         let w = BGPUpdateMessageBuilder::default()
             .withdrawn_routes(vec![])
-            .path_attributes(vec![])
-            .nlri(vec![])
+            .path_attributes(pa)
+            .nlri(nlri)
             .build()
             .unwrap();
         assert_eq!(u, w);
@@ -1273,10 +1559,72 @@ mod tests {
             0x00, 0x09, 0x15, 0xac, 0x10, 0x00,
         ];
         let u: BGPUpdateMessage = v.into();
+        let pa: Vec<PathAttribute> = [
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::Origin,
+                value: PathAttributeValue::Origin(OriginType::INCOMPLETE),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::AsPath,
+                value: PathAttributeValue::AsPath(
+                    [
+                        ASPATHSegment {
+                            path_type: ASPATHSegmentType::AsSequence,
+                            as_list: [30].to_vec(),
+                        },
+                        ASPATHSegment {
+                            path_type: ASPATHSegmentType::AsSet,
+                            as_list: [10, 20].to_vec(),
+                        },
+                    ]
+                    .to_vec(),
+                ),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::NextHop,
+                value: PathAttributeValue::NextHop("10.0.0.9".parse().unwrap()),
+            },
+            PathAttribute {
+                optional: true,
+                transitive: false,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::MultiExitDisc,
+                value: PathAttributeValue::MultiExitDisc(0),
+            },
+            PathAttribute {
+                optional: true,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::Aggregator,
+                value: PathAttributeValue::Aggregator(AggregatorValue {
+                    last_as: 30,
+                    aggregator: "10.0.0.9".parse().unwrap(),
+                }),
+            },
+        ]
+        .to_vec();
+        let nlri: Vec<NLRI> = [NLRI {
+            net: "172.16.0.0/21".parse().unwrap(),
+        }]
+        .to_vec();
         let w = BGPUpdateMessageBuilder::default()
             .withdrawn_routes(vec![])
-            .path_attributes(vec![])
-            .nlri(vec![])
+            .path_attributes(pa)
+            .nlri(nlri)
             .build()
             .unwrap();
         assert_eq!(u, w);
@@ -1285,8 +1633,12 @@ mod tests {
     #[test]
     fn test_u8_to_nlri1() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![24, 192, 168, 1];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![24, 192, 168, 1],
+        };
         let u: NLRI = v.into();
 
         assert_eq!(n, u);
@@ -1295,8 +1647,12 @@ mod tests {
     #[test]
     fn test_u8_to_nlri2() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![32, 192, 168, 1, 1];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![32, 192, 168, 1, 1],
+        };
         let u: NLRI = v.into();
 
         assert_eq!(n, u);
@@ -1305,8 +1661,12 @@ mod tests {
     #[test]
     fn test_u8_to_nlri3() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![25, 192, 168, 1, 128];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![25, 192, 168, 1, 128],
+        };
         let u: NLRI = v.into();
 
         assert_eq!(n, u);
@@ -1315,8 +1675,12 @@ mod tests {
     #[test]
     fn test_into_nlri_24() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![24, 192, 168, 1];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![24, 192, 168, 1],
+        };
         let n1: NLRI = v.into();
         assert_eq!(n.net, n1.net);
     }
@@ -1324,8 +1688,12 @@ mod tests {
     #[test]
     fn test_into_nlri_32() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![32, 192, 168, 1, 1];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![32, 192, 168, 1, 1],
+        };
         let n1: NLRI = v.into();
         assert_eq!(n.net, n1.net);
     }
@@ -1333,8 +1701,12 @@ mod tests {
     #[test]
     fn test_into_nlri_25() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
-        let n = NLRI { net };
-        let v: Vec<u8> = vec![25, 192, 168, 1, 128];
+        let n = NLRI {
+            net: IpNet::V4(net),
+        };
+        let v = Ipv4Octets {
+            octets: vec![25, 192, 168, 1, 128],
+        };
         let n1: NLRI = v.into();
         assert_eq!(n.net, n1.net);
     }

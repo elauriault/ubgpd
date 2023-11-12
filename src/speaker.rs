@@ -16,6 +16,7 @@ use tokio::time::{sleep, Duration};
 // use tokio_util::codec::Framed;
 
 use crate::bgp;
+use crate::bgp::AddressFamily;
 use crate::config;
 use crate::fib;
 use crate::neighbor;
@@ -35,8 +36,8 @@ pub struct BGPSpeaker {
     local_ip: Ipv4Addr,
     local_port: u16,
     families: Vec<bgp::AddressFamily>,
-    pub rib: rib::Rib,
-    pub ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
+    pub rib: HashMap<bgp::AddressFamily, rib::Rib>,
+    pub ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<RibEvent>>,
     pub neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
 }
 
@@ -57,7 +58,7 @@ impl BGPSpeaker {
             .local_port(local_port)
             .families(families)
             .rib(HashMap::new())
-            .ribtx(None)
+            .ribtx(HashMap::new())
             .neighbors(vec![])
             .build()
             .unwrap()
@@ -66,7 +67,7 @@ impl BGPSpeaker {
     pub async fn add_neighbor(
         &mut self,
         config: config::Neighbor,
-        ribtx: Option<tokio::sync::mpsc::Sender<RibEvent>>,
+        ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<RibEvent>>,
     ) {
         let n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
             config.ip.parse().unwrap(),
@@ -81,12 +82,7 @@ impl BGPSpeaker {
         self.neighbors.push(n);
     }
 
-    async fn add_incoming(
-        speaker: Arc<Mutex<BGPSpeaker>>,
-        socket: TcpStream,
-        addr: SocketAddr,
-        // ribtx: tokio::sync::mpsc::Sender<RibEvent>,
-    ) {
+    async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
         println!("A new connection!");
         let n;
         {
@@ -125,19 +121,27 @@ impl BGPSpeaker {
     }
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
-        let (tx, rx) = mpsc::channel::<RibEvent>(100);
-        // let t1 = tx.clone();
-        // let tx = Arc::new(Mutex::new(tx));
+        let mut rx_channels = HashMap::new();
 
         {
             let mut speaker = speaker.lock().await;
-            speaker.ribtx = Some(tx);
+            for af in speaker.families.clone() {
+                let rib = HashMap::new();
+                let (tx, rx) = mpsc::channel::<RibEvent>(100);
+                speaker.rib.insert(af.clone(), rib);
+                speaker.ribtx.insert(af.clone(), tx);
+                rx_channels.insert(af.clone(), rx);
+            }
+        }
+
+        for (af, rx) in rx_channels {
+            let s = speaker.clone();
+            tokio::spawn(async move { BGPSpeaker::fib_mgr(s, af.clone(), rx).await });
         }
 
         let s1 = speaker.clone();
         let s2 = speaker.clone();
 
-        tokio::spawn(async move { BGPSpeaker::fib_mgr(speaker, rx).await });
         tokio::spawn(async move { BGPSpeaker::connection_mgr(s1).await });
         tokio::spawn(async move { BGPSpeaker::listen(s2).await });
     }
@@ -154,7 +158,6 @@ impl BGPSpeaker {
         }
     }
 
-    // async fn listen(speaker: Arc<Mutex<BGPSpeaker>>, ribtx: tokio::sync::mpsc::Sender<RibEvent>) {
     async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
         let local_ip;
         let local_port;
@@ -170,24 +173,25 @@ impl BGPSpeaker {
 
         loop {
             let (socket, addr) = listener.accept().await.unwrap();
-            // BGPSpeaker::add_incoming(speaker.clone(), socket, addr, ribtx.clone()).await;
             BGPSpeaker::add_incoming(speaker.clone(), socket, addr).await;
         }
     }
 
     async fn fib_mgr(
         speaker: Arc<Mutex<BGPSpeaker>>,
+        family: AddressFamily,
         mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
     ) {
-        println!("starting fib manager");
+        println!("starting fib manager for {:?}", family);
 
         loop {
             let e = rx.recv().await;
-            println!("Fib Manager : Got {:?}", e);
-            let mut f = fib::Fib::new().await;
+            println!("Fib Manager {:?} : Got {:?}", family, e);
+            let mut f = fib::Fib::new(family.clone()).await;
             {
                 let s = speaker.lock().await;
-                f.sync(s.rib.clone()).await;
+                let rib: rib::Rib = s.rib.get(&family).unwrap().clone();
+                f.sync(rib).await;
             }
             sleep(Duration::from_secs(1)).await;
         }

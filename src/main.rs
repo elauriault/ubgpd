@@ -1,7 +1,7 @@
 use tokio::time::{sleep, Duration};
 // use serde::Deserialize;
 use async_std::sync::{Arc, Mutex};
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 // use std::fs::File;
 use clap::Parser;
 use std::io::prelude::*;
@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Some(i) => Some(i),
                 None => Some(speaker.hold_time),
             };
-            speaker.add_neighbor(n, None).await;
+            speaker.add_neighbor(n, HashMap::new()).await;
         }
     }
 

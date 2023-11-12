@@ -2,6 +2,7 @@ use async_std::sync::{Arc, Mutex};
 use futures::prelude::sink::SinkExt;
 use itertools::Itertools;
 use num_traits::FromPrimitive;
+use std::collections::HashMap;
 // use futures::TryFutureExt;
 // use std::collections::HashMap;
 use std::error::Error;
@@ -16,7 +17,9 @@ use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::bgp::{self, BGPCapabilities};
+use crate::bgp::{
+    self, AddressFamily, BGPCapabilities, PathAttributeType, PathAttributeValue, MPNLRI,
+};
 // use crate::config;
 // use crate::fib;
 use crate::rib;
@@ -106,7 +109,8 @@ pub struct BGPNeighbor {
     capabilities_advertised: Capabilities,
     capabilities_received: Capabilities,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
-    ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
+    // ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
+    ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     attributes: BGPSessionAttributes,
 }
 
@@ -184,7 +188,7 @@ impl BGPNeighbor {
         connect_retry_time: u16,
         state: BGPState,
         families: Option<Vec<bgp::AddressFamily>>,
-        ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
+        ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     ) -> Self {
         let tx = None;
         // let ribtx = None;
@@ -891,13 +895,46 @@ impl BGPNeighbor {
         s: Arc<Mutex<speaker::BGPSpeaker>>,
         nb: Arc<Mutex<BGPNeighbor>>,
     ) {
-        let ra = rib::RouteAttributes::new(m.path_attributes, s.clone(), nb.clone()).await;
+        let mut af = AddressFamily {
+            afi: bgp::AFI::Ipv4,
+            safi: bgp::SAFI::NLRIUnicast,
+        };
+        let mut nlris = vec![];
+        let mut withdrawn = vec![];
+        let mut nh = None;
+        match m
+            .path_attributes
+            .clone()
+            .into_iter()
+            .find(|x| {
+                x.type_code == PathAttributeType::MPReachableNLRI
+                    || x.type_code == PathAttributeType::MPUnreachableNLRI
+            })
+            .map(|x| x.value)
+        {
+            Some(PathAttributeValue::MPReachableNLRI(n)) => {
+                nlris = n.nlris;
+                nh = Some(n.nh);
+                af = n.af;
+            }
+            Some(PathAttributeValue::MPUnreachableNLRI(n)) => {
+                withdrawn = n.nlris;
+                af = n.af;
+            }
+            _ => {
+                nlris = m.nlri;
+                withdrawn = m.withdrawn_routes;
+            }
+        }
+        let ra =
+            rib::RouteAttributes::new(m.path_attributes.clone(), s.clone(), nb.clone(), nh).await;
         {
             let mut s = s.lock().await;
-            for nlri in m.nlri {
-                match s.rib.get_mut(&nlri) {
+            let rib = s.rib.get_mut(&af).unwrap();
+            for nlri in nlris {
+                match rib.get_mut(&nlri) {
                     None => {
-                        s.rib.insert(nlri, vec![ra.clone()]);
+                        rib.insert(nlri, vec![ra.clone()]);
                     }
                     Some(attributes) => {
                         attributes.push(ra.clone());
@@ -911,27 +948,31 @@ impl BGPNeighbor {
                 n = nb.router_id;
                 // ribtx = nb.ribtx.clone();
             }
-            for nlri in m.withdrawn_routes {
-                match s.rib.get_mut(&nlri) {
+            // let mut rib = s.rib.get(&af).unwrap().clone();
+            for nlri in withdrawn {
+                match rib.get_mut(&nlri) {
                     None => {}
                     Some(attributes) => {
                         attributes.retain(|x| !x.from_neighbor(n));
                     }
                 }
             }
-            println!("RIB : {:?}", s.rib);
-            {
-                let nb = nb.lock().await;
-                // let tx = nb.ribtx.unwrap().clone();
-                // let tx = nb.ribtx.unwrap().lock().await;
-                // let t = tx.lock().await.send(speaker::RibEvent::RibUpdated).await;
-                let _ = nb
-                    .ribtx
-                    .as_ref()
-                    .unwrap()
-                    .send(speaker::RibEvent::RibUpdated)
-                    .await;
-            }
+            println!("\nRIB {:?} : {:?}\n", af, rib);
+        }
+        {
+            let nb = nb.lock().await;
+            // let tx = nb.ribtx.unwrap().clone();
+            // let tx = nb.ribtx.unwrap().lock().await;
+            // let t = tx.lock().await.send(speaker::RibEvent::RibUpdated).await;
+            // let tx = nb.ribtx.get(&af).unwrap();
+            let _ = nb
+                .ribtx
+                .get(&af)
+                .unwrap()
+                // .as_ref()
+                // .unwrap()
+                .send(speaker::RibEvent::RibUpdated)
+                .await;
         }
     }
 
