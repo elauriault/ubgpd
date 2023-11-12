@@ -1,8 +1,9 @@
 use async_std::sync::{Arc, Mutex};
+// use ipnet::IpAdd;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
+// use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use crate::bgp;
@@ -13,14 +14,14 @@ use crate::speaker;
 pub struct RouteAttributes {
     as_path: bgp::ASPATH,
     origin: bgp::OriginType,
-    pub next_hop: Ipv4Addr,
+    pub next_hop: IpAddr,
     local_pref: Option<u32>,
     multi_exit_disc: Option<u32>,
     path_type: PathType,
     peer_type: PeeringType,
     recv_time: Instant,
     peer_rid: u32,
-    peer_ip: u32,
+    peer_ip: IpAddr,
 }
 
 impl RouteAttributes {
@@ -34,10 +35,11 @@ impl RouteAttributes {
         src: Vec<bgp::PathAttribute>,
         s: Arc<Mutex<speaker::BGPSpeaker>>,
         nb: Arc<Mutex<neighbor::BGPNeighbor>>,
+        nh: Option<IpAddr>,
     ) -> RouteAttributes {
         let mut multi_exit_disc = None;
         let mut local_pref = None;
-        let mut next_hop = Ipv4Addr::from([1, 1, 1, 1]);
+        let mut next_hop = IpAddr::V4("1.1.1.1".parse().unwrap());
         let mut as_path: Vec<bgp::ASPATHSegment> = vec![];
         let mut origin = bgp::OriginType::IGP;
         for p in src {
@@ -49,7 +51,7 @@ impl RouteAttributes {
                     as_path = a;
                 }
                 bgp::PathAttributeValue::NextHop(n) => {
-                    next_hop = n;
+                    next_hop = IpAddr::V4(n);
                 }
                 bgp::PathAttributeValue::MultiExitDisc(m) => {
                     multi_exit_disc = Some(m);
@@ -62,6 +64,10 @@ impl RouteAttributes {
                 _ => {}
             }
         }
+        match nh {
+            Some(n) => next_hop = n,
+            None => {}
+        }
         let local_asn;
         {
             let s = s.lock().await;
@@ -69,7 +75,7 @@ impl RouteAttributes {
         }
         let remote_asn;
         let peer_rid;
-        let mut peer_ip = Ipv4Addr::new(0, 0, 0, 0);
+        // let mut peer_ip = Ipv4Addr::new(0, 0, 0, 0);
         let rip;
         {
             let nb = nb.lock().await;
@@ -78,14 +84,13 @@ impl RouteAttributes {
             rip = nb.remote_ip;
         }
 
-        match rip {
-            IpAddr::V4(ipv4) => {
-                peer_ip = ipv4;
-            }
-            IpAddr::V6(_) => {}
-        }
-
-        let peer_ip = u32::from(peer_ip);
+        let peer_ip = rip;
+        // match rip {
+        //     IpAddr::V4(ipv4) => {
+        //         peer_ip = ipv4;
+        //     }
+        //     IpAddr::V6(_) => {}
+        // }
 
         let peer_type;
         let path_type;
