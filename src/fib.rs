@@ -6,7 +6,7 @@ use netlink_packet_route::link::nlas::Nla as lnla;
 use netlink_packet_route::nlas::route::Nla as rnla;
 use netlink_packet_route::RouteMessage;
 use rtnetlink::{new_connection, Handle, IpVersion};
-use std::error::Error;
+// use std::error::Error;
 use std::net::IpAddr;
 
 use crate::bgp::{AddressFamily, AFI};

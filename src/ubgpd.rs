@@ -1,10 +1,8 @@
-use tokio::time::{sleep, Duration};
-// use serde::Deserialize;
 use async_std::sync::{Arc, Mutex};
-use std::{collections::HashMap, error::Error};
-// use std::fs::File;
 use clap::Parser;
 use std::io::prelude::*;
+use std::{collections::HashMap, error::Error};
+use tokio::time::{sleep, Duration};
 
 #[macro_use]
 extern crate derive_builder;
@@ -57,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    println!("config: {:?}", config);
+    // println!("config: {:?}", config);
 
     let families = config.families.clone();
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(
@@ -71,7 +69,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     {
         let neighbors = config.neighbors.unwrap();
-        // let speaker = speaker.clone();
         let mut speaker = speaker.lock().await;
         for mut n in neighbors {
             let families = config.families.clone();
