@@ -7,7 +7,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6.2", features = ["codec"]}
 tokio-stream = "0.1"
@@ -20,7 +19,6 @@ derive_builder = "^0.9"
 byteorder = "1.4.2"
 async-std = "1"
 futures = "0.3"
-# structopt = { version = "0.3" }
 thiserror = "1.0"
 ipnet = "2.0"
 toml = "0.5"
@@ -35,3 +33,16 @@ netlink-sys = "*"
 netlink-proto = "*"
 clap = { version = "^3", features = ["derive"]}
 itertools = "*"
+tonic = "0.10"
+prost = "0.12"
+
+[build-dependencies]
+tonic-build = "0.10"
+
+[[bin]]
+name = "ubgpd"
+path = "src/ubgpd.rs"
+
+[[bin]]
+name = "ubgpc"
+path = "src/ubgpc.rs"

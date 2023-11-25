@@ -22,7 +22,7 @@ use crate::bgp::{
 };
 // use crate::config;
 // use crate::fib;
-use crate::rib;
+use crate::rib::{self, RibUpdate};
 use crate::speaker;
 
 #[derive(Debug, Clone, Copy)]
@@ -157,8 +157,7 @@ impl From<bgp::BGPCapabilities> for Capabilities {
                     v.copy_from_slice(&c.capability_value);
                     let asn = u32::from_be_bytes(v);
                     capabilities.four_octect_asn = Some(asn);
-                }
-                _ => {}
+                } // _ => {}
             }
         }
         capabilities.multiprotocol = Some(afs.into_iter().unique().collect());
@@ -926,54 +925,83 @@ impl BGPNeighbor {
                 withdrawn = m.withdrawn_routes;
             }
         }
-        let ra =
-            rib::RouteAttributes::new(m.path_attributes.clone(), s.clone(), nb.clone(), nh).await;
+        let local_asn;
         {
-            let mut s = s.lock().await;
-            let rib = s.rib.get_mut(&af).unwrap();
-            for nlri in nlris {
-                match rib.get_mut(&nlri) {
-                    None => {
-                        rib.insert(nlri, vec![ra.clone()]);
-                    }
-                    Some(attributes) => {
-                        attributes.push(ra.clone());
-                    }
-                }
-            }
-            let n;
-            // let ribtx;
+            let s = s.lock().await;
+            local_asn = s.local_asn;
+        }
+        let attributes =
+            rib::RouteAttributes::new(m.path_attributes.clone(), local_asn.into(), nb.clone(), nh)
+                .await;
+        if withdrawn.len() > 0 {
+            let updates = RibUpdate {
+                nlris: withdrawn,
+                attributes: attributes.clone(),
+            };
             {
                 let nb = nb.lock().await;
-                n = nb.router_id;
-                // ribtx = nb.ribtx.clone();
+                let _ = nb
+                    .ribtx
+                    .get(&af)
+                    .unwrap()
+                    .send(speaker::RibEvent::WithdrawRoutes(updates))
+                    .await;
             }
-            // let mut rib = s.rib.get(&af).unwrap().clone();
-            for nlri in withdrawn {
-                match rib.get_mut(&nlri) {
-                    None => {}
-                    Some(attributes) => {
-                        attributes.retain(|x| !x.from_neighbor(n));
-                    }
-                }
+        }
+        if nlris.len() > 0 {
+            let updates = RibUpdate { nlris, attributes };
+            {
+                let nb = nb.lock().await;
+                let _ = nb
+                    .ribtx
+                    .get(&af)
+                    .unwrap()
+                    .send(speaker::RibEvent::AddRoutes(updates))
+                    .await;
             }
-            println!("\nRIB {:?} : {:?}\n", af, rib);
         }
-        {
-            let nb = nb.lock().await;
-            // let tx = nb.ribtx.unwrap().clone();
-            // let tx = nb.ribtx.unwrap().lock().await;
-            // let t = tx.lock().await.send(speaker::RibEvent::RibUpdated).await;
-            // let tx = nb.ribtx.get(&af).unwrap();
-            let _ = nb
-                .ribtx
-                .get(&af)
-                .unwrap()
-                // .as_ref()
-                // .unwrap()
-                .send(speaker::RibEvent::RibUpdated)
-                .await;
-        }
+        // {
+        //     // let mut s = s.lock().await;
+        //     // let rib = s.rib.get_mut(&af).unwrap();
+        //     // for nlri in nlris {
+        //     //     match rib.get_mut(&nlri) {
+        //     //         None => {
+        //     //             rib.insert(nlri, vec![ra.clone()]);
+        //     //         }
+        //     //         Some(attributes) => {
+        //     //             attributes.push(ra.clone());
+        //     //         }
+        //     //     }
+        //     // }
+        //     let n;
+        //     // let ribtx;
+        //     {
+        //         let nb = nb.lock().await;
+        //         n = nb.router_id;
+        //         // ribtx = nb.ribtx.clone();
+        //     }
+        //     // let mut rib = s.rib.get(&af).unwrap().clone();
+        //     // for nlri in withdrawn {
+        //     //     match rib.get_mut(&nlri) {
+        //     //         None => {}
+        //     //         Some(attributes) => {
+        //     //             attributes.retain(|x| !x.from_neighbor(n));
+        //     //         }
+        //     //     }
+        //     // }
+        //     // println!("\nRIB {:?} : {:?}\n", af, rib);
+        // }
+        // {
+        //     let nb = nb.lock().await;
+        //     let _ = nb
+        //         .ribtx
+        //         .get(&af)
+        //         .unwrap()
+        //         // .as_ref()
+        //         // .unwrap()
+        //         .send(speaker::RibEvent::RibUpdated)
+        //         .await;
+        // }
     }
 
     async fn collision_detection(

@@ -20,8 +20,14 @@ pub struct RouteAttributes {
     path_type: PathType,
     peer_type: PeeringType,
     recv_time: Instant,
-    peer_rid: u32,
+    pub peer_rid: u32,
     peer_ip: IpAddr,
+}
+
+#[derive(Debug, Clone)]
+pub struct RibUpdate {
+    pub nlris: Vec<bgp::NLRI>,
+    pub attributes: RouteAttributes,
 }
 
 impl RouteAttributes {
@@ -33,13 +39,14 @@ impl RouteAttributes {
     }
     pub async fn new(
         src: Vec<bgp::PathAttribute>,
-        s: Arc<Mutex<speaker::BGPSpeaker>>,
+        local_asn: u32,
+        // s: Arc<Mutex<speaker::BGPSpeaker>>,
         nb: Arc<Mutex<neighbor::BGPNeighbor>>,
         nh: Option<IpAddr>,
     ) -> RouteAttributes {
         let mut multi_exit_disc = None;
         let mut local_pref = None;
-        let mut next_hop = IpAddr::V4("1.1.1.1".parse().unwrap());
+        let mut next_hop = None;
         let mut as_path: Vec<bgp::ASPATHSegment> = vec![];
         let mut origin = bgp::OriginType::IGP;
         for p in src {
@@ -51,7 +58,7 @@ impl RouteAttributes {
                     as_path = a;
                 }
                 bgp::PathAttributeValue::NextHop(n) => {
-                    next_hop = IpAddr::V4(n);
+                    next_hop = Some(IpAddr::V4(n));
                 }
                 bgp::PathAttributeValue::MultiExitDisc(m) => {
                     multi_exit_disc = Some(m);
@@ -65,37 +72,24 @@ impl RouteAttributes {
             }
         }
         match nh {
-            Some(n) => next_hop = n,
+            Some(n) => next_hop = Some(n),
             None => {}
         }
-        let local_asn;
-        {
-            let s = s.lock().await;
-            local_asn = s.local_asn;
-        }
+        let next_hop = next_hop.unwrap();
         let remote_asn;
         let peer_rid;
-        // let mut peer_ip = Ipv4Addr::new(0, 0, 0, 0);
-        let rip;
+        let peer_ip;
         {
             let nb = nb.lock().await;
             remote_asn = nb.remote_asn;
             peer_rid = nb.router_id;
-            rip = nb.remote_ip;
+            peer_ip = nb.remote_ip;
         }
-
-        let peer_ip = rip;
-        // match rip {
-        //     IpAddr::V4(ipv4) => {
-        //         peer_ip = ipv4;
-        //     }
-        //     IpAddr::V6(_) => {}
-        // }
 
         let peer_type;
         let path_type;
 
-        if local_asn == remote_asn {
+        if local_asn == remote_asn as u32 {
             peer_type = PeeringType::Ibgp;
             path_type = PathType::Internal;
         } else {

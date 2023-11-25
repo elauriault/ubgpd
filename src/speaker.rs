@@ -24,7 +24,8 @@ use crate::rib;
 
 #[derive(Debug)]
 pub enum RibEvent {
-    RibUpdated,
+    AddRoutes(rib::RibUpdate),
+    WithdrawRoutes(rib::RibUpdate),
 }
 
 #[derive(Builder, Debug)]
@@ -136,7 +137,7 @@ impl BGPSpeaker {
 
         for (af, rx) in rx_channels {
             let s = speaker.clone();
-            tokio::spawn(async move { BGPSpeaker::fib_mgr(s, af.clone(), rx).await });
+            tokio::spawn(async move { BGPSpeaker::rib_mgr(s, af.clone(), rx).await });
         }
 
         let s1 = speaker.clone();
@@ -174,6 +175,60 @@ impl BGPSpeaker {
         loop {
             let (socket, addr) = listener.accept().await.unwrap();
             BGPSpeaker::add_incoming(speaker.clone(), socket, addr).await;
+        }
+    }
+
+    async fn rib_mgr(
+        speaker: Arc<Mutex<BGPSpeaker>>,
+        family: AddressFamily,
+        mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
+    ) {
+        println!("starting rib manager for {:?}", family);
+
+        // tokio::spawn(async move { BGPSpeaker::fib_mgr(speaker, family.clone(), rx.clone()).await });
+
+        loop {
+            let e = rx.recv().await.unwrap();
+            println!("Rib Manager {:?} : Got {:?}", family, e);
+            match e {
+                RibEvent::AddRoutes(routes) => {
+                    println!("Adding routes {:?}", routes);
+                    let mut s = speaker.lock().await;
+                    let rib: &mut HashMap<bgp::NLRI, Vec<rib::RouteAttributes>> =
+                        s.rib.get_mut(&family).unwrap();
+                    for nlri in routes.nlris {
+                        match rib.get_mut(&nlri) {
+                            None => {
+                                rib.insert(nlri, vec![routes.attributes.clone()]);
+                            }
+                            Some(attributes) => {
+                                attributes.push(routes.attributes.clone());
+                            }
+                        }
+                    }
+                }
+                RibEvent::WithdrawRoutes(routes) => {
+                    println!("Withdrawing routes {:?}", routes);
+                    let s = speaker.lock().await;
+                    let mut rib = s.rib.get(&family).unwrap().clone();
+                    let n = routes.attributes.peer_rid;
+                    for nlri in routes.nlris {
+                        match rib.get_mut(&nlri) {
+                            None => {}
+                            Some(attributes) => {
+                                attributes.retain(|x| !x.from_neighbor(n));
+                            }
+                        }
+                    }
+                }
+            }
+            // let mut f = fib::Fib::new(family.clone()).await;
+            // {
+            //     let s = speaker.lock().await;
+            //     let rib: rib::Rib = s.rib.get(&family).unwrap().clone();
+            //     f.sync(rib).await;
+            // }
+            sleep(Duration::from_secs(1)).await;
         }
     }
 
