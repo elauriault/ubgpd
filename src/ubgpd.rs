@@ -39,10 +39,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => Some(179),
     };
 
-    config.localip = match config.localip {
-        Some(i) => Some(i),
-        None => Some("127.0.0.1".parse().unwrap()),
-    };
+    // config.localip = match config.localip {
+    //     Some(i) => Some(i),
+    //     None => Some("127.0.0.1".parse().unwrap()),
+    // };
 
     config.families = match config.families {
         Some(i) => Some(i),
@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.asn,
         u32::from(config.rid),
         config.hold_time.unwrap(),
-        config.localip.unwrap(),
+        // config.localip.unwrap(),
         config.port.unwrap(),
         families.unwrap(),
     )));
