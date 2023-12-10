@@ -1,19 +1,17 @@
-use hello_world::greeter_client::GreeterClient;
-use hello_world::HelloRequest;
+use ubgp::config_client::ConfigClient;
+use ubgp::NeighborRequest;
 
-pub mod hello_world {
+pub mod ubgp {
     tonic::include_proto!("ubgp");
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = GreeterClient::connect("http://[::1]:50051").await?;
+    let mut client = ConfigClient::connect("http://[::1]:50051").await?;
 
-    let request = tonic::Request::new(HelloRequest {
-        name: "Tonic".into(),
-    });
+    let request = tonic::Request::new(NeighborRequest { ip: "Tonic".into() });
 
-    let response = client.say_hello(request).await?;
+    let response = client.get_neighbor_config(request).await?;
 
     println!("RESPONSE={:?}", response);
 

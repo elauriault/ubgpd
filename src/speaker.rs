@@ -47,7 +47,7 @@ impl BGPSpeaker {
         local_asn: u16,
         router_id: u32,
         hold_time: u16,
-        local_ip: Ipv4Addr,
+        // local_ip: Ipv4Addr,
         local_port: u16,
         families: Vec<bgp::AddressFamily>,
     ) -> Self {
@@ -55,7 +55,7 @@ impl BGPSpeaker {
             .local_asn(local_asn)
             .router_id(router_id)
             .hold_time(hold_time)
-            .local_ip(local_ip)
+            // .local_ip(local_ip)
             .local_port(local_port)
             .families(families)
             .rib(HashMap::new())

@@ -1,14 +1,21 @@
 syntax = "proto3";
 package ubgp;
 
-service Greeter {
-    rpc SayHello (HelloRequest) returns (HelloReply);
+service Config {
+  rpc GetNeighborConfig (NeighborRequest) returns (NeighborReply);
 }
 
-message HelloRequest {
-   string name = 1;
+// service State {
+//   rpc GetSession (NeighborRequest) returns (NeighborReply);
+// }
+
+message NeighborReply {
+  string ip = 1;
+  int32 port = 2;
+  int32 asn = 3;
+  int32 routerid = 4;
 }
 
-message HelloReply {
-    string message = 1;
+message NeighborRequest {
+  string ip = 1;
 }
