@@ -1,13 +1,15 @@
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
-use ipnet::IpNet;
-use netlink_packet::RouteProtocol;
-use netlink_packet_route::link::nlas::Nla as lnla;
-use netlink_packet_route::nlas::route::Nla as rnla;
-use netlink_packet_route::RouteMessage;
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+// use netlink_packet::route::RouteProtool;
+// use netlink_packet_route::link::nlas::Nla as lnla;
+use netlink_packet_route::link::LinkAttribute;
+// use netlink_packet_route::route::nlas::Nla as rnla;
+// use netlink_packet_route::route::message::RouteMessage;
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
 use rtnetlink::{new_connection, Handle, IpVersion};
 // use std::error::Error;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::bgp::{AddressFamily, AFI};
 use crate::rib;
@@ -26,26 +28,46 @@ impl FibEntry {
     async fn from_rtnl(msg: RouteMessage) -> FibEntry {
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
-        let prefix = RouteMessage::destination_prefix(&msg);
-        let prefix = match prefix {
-            None => None,
-            Some(v) => {
-                let str = format!("{}/{}", v.0, v.1);
-                Some(str.parse().unwrap())
+        let plen = msg.header.destination_prefix_length;
+        let prefix = msg.attributes.iter().find_map(|nla| {
+            if let RouteAttribute::Destination(v) = nla {
+                match v {
+                    RouteAddress::Inet(t) => Some(Ipv4Net::new(*t, plen).unwrap().into()),
+                    RouteAddress::Inet6(t) => Some(Ipv6Net::new(*t, plen).unwrap().into()),
+                    _ => None,
+                }
+            } else {
+                None
             }
-        };
-
-        let next_hop = RouteMessage::gateway(&msg);
-        let dev = RouteMessage::output_interface(&msg);
-        let dev = get_link_name(handle, dev.unwrap()).await;
-        let metric = msg.nlas.iter().find_map(|nla| {
-            if let rnla::Priority(v) = nla {
+        });
+        let next_hop = msg.attributes.iter().find_map(|nla| {
+            if let RouteAttribute::Gateway(v) = nla {
+                match v {
+                    RouteAddress::Inet(t) => Some(IpAddr::V4(*t)),
+                    RouteAddress::Inet6(t) => Some(IpAddr::V6(*t)),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        });
+        let dev = msg.attributes.iter().find_map(|nla| {
+            if let RouteAttribute::Oif(v) = nla {
                 Some(*v)
             } else {
                 None
             }
         });
-        let proto: RouteProtocol = msg.header.protocol.into();
+        let dev = get_link_name(handle, dev.unwrap()).await;
+        let metric = msg.attributes.iter().find_map(|nla| {
+            if let RouteAttribute::Metrics(_v) = nla {
+                // Some(*v)
+                None
+            } else {
+                None
+            }
+        });
+        let proto = msg.header.protocol;
         FibEntry {
             prefix,
             next_hop,
@@ -168,6 +190,7 @@ impl Fib {
             AFI::Ipv4 => handle.route().get(IpVersion::V4).execute(),
             AFI::Ipv6 => handle.route().get(IpVersion::V6).execute(),
         };
+        // let mut v: Vec<RouteMessage> = vec![];
         let mut v = vec![];
         while let Some(route) = routes.try_next().await.unwrap_or(None) {
             v.push(route);
@@ -176,6 +199,8 @@ impl Fib {
             .then(|b| FibEntry::from_rtnl(b))
             .collect::<Vec<FibEntry>>()
             .await;
+
+        let z = vec![];
         z
     }
 }
@@ -184,10 +209,10 @@ async fn get_link_name(handle: Handle, index: u32) -> String {
     let mut links = handle.link().get().match_index(index).execute();
     let msg = links.try_next().await.unwrap().unwrap();
 
-    msg.nlas
+    msg.attributes
         .iter()
         .find_map(|nla| {
-            if let lnla::IfName(v) = nla {
+            if let LinkAttribute::IfName(v) = nla {
                 Some(v.clone())
             } else {
                 None
