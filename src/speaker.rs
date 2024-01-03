@@ -28,6 +28,11 @@ pub enum RibEvent {
     WithdrawRoutes(rib::RibUpdate),
 }
 
+#[derive(Debug)]
+pub enum FibEvent {
+    RibUpdated,
+}
+
 #[derive(Builder, Debug)]
 #[builder(setter(into))]
 pub struct BGPSpeaker {
@@ -37,7 +42,7 @@ pub struct BGPSpeaker {
     local_ip: Ipv4Addr,
     local_port: u16,
     families: Vec<bgp::AddressFamily>,
-    pub rib: HashMap<bgp::AddressFamily, rib::Rib>,
+    pub rib: HashMap<bgp::AddressFamily, Arc<Mutex<rib::Rib>>>,
     pub ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<RibEvent>>,
     pub neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
 }
@@ -47,7 +52,7 @@ impl BGPSpeaker {
         local_asn: u16,
         router_id: u32,
         hold_time: u16,
-        // local_ip: Ipv4Addr,
+        local_ip: Ipv4Addr,
         local_port: u16,
         families: Vec<bgp::AddressFamily>,
     ) -> Self {
@@ -55,7 +60,7 @@ impl BGPSpeaker {
             .local_asn(local_asn)
             .router_id(router_id)
             .hold_time(hold_time)
-            // .local_ip(local_ip)
+            .local_ip(local_ip)
             .local_port(local_port)
             .families(families)
             .rib(HashMap::new())
@@ -122,22 +127,19 @@ impl BGPSpeaker {
     }
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
-        let mut rx_channels = HashMap::new();
-
         {
             let mut speaker = speaker.lock().await;
             for af in speaker.families.clone() {
-                let rib = HashMap::new();
-                let (tx, rx) = mpsc::channel::<RibEvent>(100);
-                speaker.rib.insert(af.clone(), rib);
-                speaker.ribtx.insert(af.clone(), tx);
-                rx_channels.insert(af.clone(), rx);
+                let rib = Arc::new(Mutex::new(HashMap::new()));
+                let (rib_tx, rib_rx) = mpsc::channel::<RibEvent>(100);
+                let (fib_tx, fib_rx) = mpsc::channel::<FibEvent>(100);
+                speaker.rib.insert(af.clone(), rib.clone());
+                speaker.ribtx.insert(af.clone(), rib_tx);
+                let r1 = rib.clone();
+                let a1 = af.clone();
+                tokio::spawn(async move { BGPSpeaker::rib_mgr(r1, a1, rib_rx, fib_tx).await });
+                tokio::spawn(async move { BGPSpeaker::fib_mgr(rib, af, fib_rx).await });
             }
-        }
-
-        for (af, rx) in rx_channels {
-            let s = speaker.clone();
-            tokio::spawn(async move { BGPSpeaker::rib_mgr(s, af.clone(), rx).await });
         }
 
         let s1 = speaker.clone();
@@ -179,9 +181,10 @@ impl BGPSpeaker {
     }
 
     async fn rib_mgr(
-        speaker: Arc<Mutex<BGPSpeaker>>,
+        rib: Arc<Mutex<rib::Rib>>,
         family: AddressFamily,
         mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
+        tx: tokio::sync::mpsc::Sender<FibEvent>,
     ) {
         println!("starting rib manager for {:?}", family);
 
@@ -193,9 +196,7 @@ impl BGPSpeaker {
             match e {
                 RibEvent::AddRoutes(routes) => {
                     println!("Adding routes {:?}", routes);
-                    let mut s = speaker.lock().await;
-                    let rib: &mut HashMap<bgp::NLRI, Vec<rib::RouteAttributes>> =
-                        s.rib.get_mut(&family).unwrap();
+                    let mut rib = rib.lock().await;
                     for nlri in routes.nlris {
                         match rib.get_mut(&nlri) {
                             None => {
@@ -209,8 +210,7 @@ impl BGPSpeaker {
                 }
                 RibEvent::WithdrawRoutes(routes) => {
                     println!("Withdrawing routes {:?}", routes);
-                    let s = speaker.lock().await;
-                    let mut rib = s.rib.get(&family).unwrap().clone();
+                    let mut rib = rib.lock().await;
                     let n = routes.attributes.peer_rid;
                     for nlri in routes.nlris {
                         match rib.get_mut(&nlri) {
@@ -228,25 +228,26 @@ impl BGPSpeaker {
             //     let rib: rib::Rib = s.rib.get(&family).unwrap().clone();
             //     f.sync(rib).await;
             // }
+            let _ = tx.send(FibEvent::RibUpdated).await;
             sleep(Duration::from_secs(1)).await;
         }
     }
 
     async fn fib_mgr(
-        speaker: Arc<Mutex<BGPSpeaker>>,
+        rib: Arc<Mutex<rib::Rib>>,
         family: AddressFamily,
-        mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
+        mut rx: tokio::sync::mpsc::Receiver<FibEvent>,
     ) {
         println!("starting fib manager for {:?}", family);
 
         loop {
-            let e = rx.recv().await;
-            println!("Fib Manager {:?} : Got {:?}", family, e);
-            let mut f = fib::Fib::new(family.clone()).await;
-            {
-                let s = speaker.lock().await;
-                let rib: rib::Rib = s.rib.get(&family).unwrap().clone();
-                f.sync(rib).await;
+            let e = rx.recv().await.unwrap();
+            match e {
+                FibEvent::RibUpdated => {
+                    println!("Fib Manager {:?} : Got {:?}", family, e);
+                    let mut f = fib::Fib::new(family.clone()).await;
+                    f.sync(rib.clone()).await;
+                }
             }
             sleep(Duration::from_secs(1)).await;
         }

@@ -24,10 +24,10 @@ ipnet = "2.0"
 toml = "0.5"
 serde = { version = "1.0" }
 serde_derive = "1.0"
-rtnetlink = "*"
 ipnetwork = "*"
 libc = "0.2"
 
+rtnetlink = "0.14"
 netlink-packet = { version = "*", features= ["rtnetlink"]}
 netlink-sys = "*"
 netlink-packet-utils = { version = "0.5" }
@@ -35,7 +35,7 @@ netlink-packet-route = { version = "0.18" }
 netlink-packet-core = { version = "0.7" }
 netlink-proto = { default-features = false, version = "0.11" }
 
-clap = { version = "^3", features = ["derive"]}
+clap = { version = "^4", features = ["derive"] }
 itertools = "*"
 tonic = "0.10"
 prost = "0.12"

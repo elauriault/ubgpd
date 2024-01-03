@@ -1,3 +1,4 @@
+use async_std::sync::{Arc, Mutex};
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -9,7 +10,7 @@ use netlink_packet_route::link::LinkAttribute;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
 use rtnetlink::{new_connection, Handle, IpVersion};
 // use std::error::Error;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 use crate::bgp::{AddressFamily, AFI};
 use crate::rib;
@@ -92,35 +93,39 @@ impl Fib {
         fib
     }
 
-    pub async fn refresh(&mut self) {
+    async fn refresh(&mut self) {
         let v = self.get_routes().await;
 
         self.routes = v;
     }
 
-    pub async fn sync(&mut self, rib: rib::Rib) {
+    pub async fn sync(&mut self, rib: Arc<Mutex<rib::Rib>>) {
         // println!("sync : {:?}", self);
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
-        for (n, mut a) in rib {
-            let _ = a.sort();
-            let a = a.first().unwrap();
-            println!("{:?} : {:?}", n, a);
-            match self
-                .find_route(n.clone().into(), a.next_hop, handle.clone())
-                .await
-            {
-                Some(_t) => {
-                    println!("Route {:?} already present, skipping it", n);
-                }
-                None => {
-                    println!("Route {:?}  is not present, adding it", n);
-                    self.add_route(n.into(), a.next_hop, handle.clone()).await;
+        {
+            let rib = rib.lock().await;
+            for (n, a) in rib.iter() {
+                let mut a = a.clone();
+                let _ = a.sort();
+                let a = a.first().unwrap();
+                println!("{:?} : {:?}", n, a);
+                match self
+                    .find_route(n.clone().into(), a.next_hop, handle.clone())
+                    .await
+                {
+                    Some(_t) => {
+                        println!("Route {:?} already present, skipping it", n);
+                    }
+                    None => {
+                        println!("Route {:?}  is not present, adding it", n);
+                        self.add_route(n.into(), a.next_hop, handle.clone()).await;
+                    }
                 }
             }
         }
     }
-    pub async fn find_route(
+    async fn find_route(
         &mut self,
         subnet: IpNet,
         nexthop: IpAddr,
@@ -138,13 +143,13 @@ impl Fib {
         })
     }
 
-    pub async fn add_route(&mut self, subnet: IpNet, nexthop: IpAddr, handle: Handle) {
+    async fn add_route(&mut self, subnet: IpNet, nexthop: IpAddr, handle: Handle) {
         let route = handle.route();
 
-        println!(
-            "\nAdding route {:?} via {:?} on {:?}, handle {:?}\n",
-            subnet, nexthop, self.af, handle
-        );
+        // println!(
+        //     "\nAdding route {:?} via {:?} on {:?}, handle {:?}\n",
+        //     subnet, nexthop, self.af, handle
+        // );
 
         match subnet {
             IpNet::V6(t) => match nexthop {
@@ -178,7 +183,7 @@ impl Fib {
         };
     }
 
-    pub async fn _del_route(&mut self, entry: FibEntry, handle: Handle) {
+    async fn _del_route(&mut self, entry: FibEntry, handle: Handle) {
         let route = handle.route();
         route.del(entry.rm).execute().await.unwrap();
     }
@@ -200,7 +205,7 @@ impl Fib {
             .collect::<Vec<FibEntry>>()
             .await;
 
-        let z = vec![];
+        // let z = vec![];
         z
     }
 }
@@ -221,16 +226,16 @@ async fn get_link_name(handle: Handle, index: u32) -> String {
         .unwrap()
 }
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_refresh() {
-        // let f = tokio_test::block_on(Fib::new());
-        // let g = Fib::default();
-        // tokio_test::block_on(g.refresh());
-        // assert_eq!(f, g);
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//
+//     use super::*;
+//
+//     #[test]
+//     fn test_refresh() {
+//         // let f = tokio_test::block_on(Fib::new());
+//         // let g = Fib::default();
+//         // tokio_test::block_on(g.refresh());
+//         // assert_eq!(f, g);
+//     }
+// }

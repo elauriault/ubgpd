@@ -3,29 +3,15 @@ use futures::prelude::sink::SinkExt;
 use itertools::Itertools;
 use num_traits::FromPrimitive;
 use std::collections::HashMap;
-// use futures::TryFutureExt;
-// use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
-// use std::net::Ipv4Addr;
-// use std::net::SocketAddr;
-// use std::sync::mpsc::{channel, Receiver};
-// use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::bgp::{
-    self,
-    AddressFamily,
-    PathAttributeType,
-    PathAttributeValue,
-    // self, AddressFamily, BGPCapabilities, PathAttributeType, PathAttributeValue, MPNLRI,
-};
-// use crate::config;
-// use crate::fib;
+use crate::bgp::{self, AddressFamily, PathAttributeType, PathAttributeValue};
 use crate::rib::{self, RibUpdate};
 use crate::speaker;
 
@@ -106,7 +92,7 @@ enum Event {
 #[derive(Debug, Clone)]
 pub struct BGPNeighbor {
     pub remote_ip: IpAddr,
-    remote_port: u16,
+    pub remote_port: u16,
     pub remote_asn: u16,
     pub router_id: u32,
     // connect_retry_time: Option<u16>,
@@ -123,6 +109,7 @@ pub struct Capabilities {
     pub multiprotocol: Option<Vec<bgp::AddressFamily>>,
     pub route_refresh: bool,
     pub outbound_route_filtering: bool,
+    pub extended_next_hop_encoding: bool,
     pub graceful_restart: bool,
     pub four_octect_asn: Option<u32>,
 }
@@ -149,6 +136,9 @@ impl From<bgp::BGPCapabilities> for Capabilities {
                     afs.push(af);
                 }
                 bgp::BGPCapabilityCode::RouteRefresh => capabilities.route_refresh = true,
+                bgp::BGPCapabilityCode::ExtendedNextHopEncoding => {
+                    capabilities.extended_next_hop_encoding = true
+                }
                 bgp::BGPCapabilityCode::OutboundRouteFiltering => {
                     capabilities.outbound_route_filtering = true
                 }
@@ -176,6 +166,7 @@ impl Default for Capabilities {
             multiprotocol: None,
             route_refresh: false,
             outbound_route_filtering: false,
+            extended_next_hop_encoding: false,
             graceful_restart: false,
             four_octect_asn: None,
         }
