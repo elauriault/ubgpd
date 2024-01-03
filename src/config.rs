@@ -7,7 +7,7 @@ use crate::bgp;
 pub struct Config {
     pub asn: u16,
     pub rid: Ipv4Addr,
-    // pub localip: Option<Ipv4Addr>,
+    pub localip: Option<Ipv4Addr>,
     pub port: Option<u16>,
     pub hold_time: Option<u16>,
     pub families: Option<Vec<bgp::AddressFamily>>,

@@ -442,6 +442,7 @@ pub enum BGPCapabilityCode {
     Multiprotocol = 1,
     RouteRefresh = 2,
     OutboundRouteFiltering = 3,
+    ExtendedNextHopEncoding = 5,
     GracefulRestart = 64,
     FourOctectASN = 65,
 }
@@ -486,8 +487,8 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                     let mut l = [0u8; 1];
                     t.copy_from_slice(&src[i..i + 1]);
                     l.copy_from_slice(&src[i + 1..i + 2]);
-                    let t = u8::from_be_bytes(t);
-                    let t = FromPrimitive::from_u8(t).unwrap();
+                    let y = u8::from_be_bytes(t);
+                    let t: Option<BGPCapabilityCode> = FromPrimitive::from_u8(y);
                     let l = u8::from_be_bytes(l);
                     let mut v = vec![];
 
@@ -495,13 +496,19 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                         v.extend_from_slice(&src[i + 2..i + 2 + l as usize]);
                     }
 
-                    let c = BGPCapability {
-                        capability_code: t,
-                        capability_length: l as usize,
-                        capability_value: v,
-                    };
-
-                    caps.push(c);
+                    match t {
+                        None => {
+                            println!("\nUnknown BGPCapabilityCode : {:?}\n", y);
+                        }
+                        Some(t) => {
+                            let c = BGPCapability {
+                                capability_code: t,
+                                capability_length: l as usize,
+                                capability_value: v,
+                            };
+                            caps.push(c);
+                        }
+                    }
 
                     i += 2 + l as usize;
                 }
@@ -997,6 +1004,12 @@ impl Into<Vec<u8>> for NLRI {
 }
 
 impl Into<IpNet> for NLRI {
+    fn into(self) -> IpNet {
+        self.net.into()
+    }
+}
+
+impl Into<IpNet> for &NLRI {
     fn into(self) -> IpNet {
         self.net.into()
     }

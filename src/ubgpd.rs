@@ -1,6 +1,7 @@
 use async_std::sync::{Arc, Mutex};
 use clap::Parser;
 use std::io::prelude::*;
+use std::path::PathBuf;
 use std::{collections::HashMap, error::Error};
 use tokio::time::{sleep, Duration};
 
@@ -10,15 +11,16 @@ extern crate derive_builder;
 mod bgp;
 mod config;
 mod fib;
+mod grpc;
 mod neighbor;
 mod rib;
 mod speaker;
 
-#[derive(Debug, clap::StructOpt)]
-#[structopt(name = "ubgpd", about = "A minimalistic bgp daemon written in rust.")]
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
 struct Opt {
-    #[structopt(short = 'c', long = "config", default_value = "ubgpd.conf")]
-    config: String,
+    #[arg(short, long, value_parser, default_value = "ubgpd.conf")]
+    config: PathBuf,
 }
 
 #[tokio::main]
@@ -39,10 +41,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => Some(179),
     };
 
-    // config.localip = match config.localip {
-    //     Some(i) => Some(i),
-    //     None => Some("127.0.0.1".parse().unwrap()),
-    // };
+    config.localip = match config.localip {
+        Some(i) => Some(i),
+        None => Some("127.0.0.1".parse().unwrap()),
+    };
 
     config.families = match config.families {
         Some(i) => Some(i),
@@ -62,7 +64,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.asn,
         u32::from(config.rid),
         config.hold_time.unwrap(),
-        // config.localip.unwrap(),
+        config.localip.unwrap(),
         config.port.unwrap(),
         families.unwrap(),
     )));
@@ -84,7 +86,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let s1 = speaker.clone();
+
     tokio::spawn(async move { speaker::BGPSpeaker::start(speaker).await });
+    tokio::spawn(async move { grpc::grpc_server(s1).await });
 
     loop {
         sleep(Duration::from_secs(1)).await;
