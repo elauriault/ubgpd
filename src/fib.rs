@@ -100,7 +100,6 @@ impl Fib {
     }
 
     pub async fn sync(&mut self, rib: Arc<Mutex<rib::Rib>>) {
-        // println!("sync : {:?}", self);
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
         {
@@ -145,11 +144,6 @@ impl Fib {
 
     async fn add_route(&mut self, subnet: IpNet, nexthop: IpAddr, handle: Handle) {
         let route = handle.route();
-
-        // println!(
-        //     "\nAdding route {:?} via {:?} on {:?}, handle {:?}\n",
-        //     subnet, nexthop, self.af, handle
-        // );
 
         match subnet {
             IpNet::V6(t) => match nexthop {

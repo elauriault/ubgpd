@@ -118,9 +118,8 @@ impl State for GrpcServer {
 
 pub async fn grpc_server(speaker: Arc<Mutex<speaker::BGPSpeaker>>) {
     let addr = "127.0.0.1:50051".parse().unwrap();
-    let s1 = speaker.clone();
-    let config_server = GrpcServer::new(speaker);
-    let state_server = GrpcServer::new(s1);
+    let config_server = GrpcServer::new(speaker.clone());
+    let state_server = GrpcServer::new(speaker);
 
     Server::builder()
         .add_service(ConfigServer::new(config_server))
