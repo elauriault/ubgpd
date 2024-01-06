@@ -577,8 +577,6 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
 
-        // println!("wdl is {}", wdl);
-
         let mut wd: Vec<NLRI> = vec![];
         let mut used = 0;
         let mut i = 2;
@@ -590,8 +588,6 @@ impl From<Vec<u8>> for BGPUpdateMessage {
                 octets: src[i..end].to_vec(),
             };
             let n: NLRI = buf.into();
-            // let n: NLRI = src[i..i + 4].to_vec().into();
-            // println!("WD : {:?}", n);
             wd.push(n.clone());
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             used += blen;
@@ -601,18 +597,14 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         let mut atl = [0u8; 2];
         atl.copy_from_slice(&src[i..i + 2]);
         let atl = u16::from_be_bytes(atl) as usize;
-        // println!("atl is {}", atl);
 
         i += 2;
-
-        // println!("i is {}", i);
 
         let mut pa: Vec<PathAttribute> = vec![];
         let mut used = 0;
         while atl > used {
             let atn = src[i + 2] as usize;
             let n: PathAttribute = src[i..i + 3 + atn].to_vec().into();
-            // println!("PathAttribute : {:?}", n);
             pa.push(n);
             used += 3 + atn;
             i += 3 + atn;
@@ -622,15 +614,12 @@ impl From<Vec<u8>> for BGPUpdateMessage {
 
         let mut routes: Vec<NLRI> = vec![];
         while i < total_len {
-            // println!("i : {:?}", i);
             let plen = src[i];
             let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
             let n: NLRI = buf.into();
-            // let n: NLRI = src[i..end].to_vec().into();
-            // println!("NLRI : {:?}", n);
             routes.push(n.clone());
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             i += blen;
@@ -657,10 +646,7 @@ pub struct PathAttribute {
 
 impl From<Vec<u8>> for PathAttribute {
     fn from(src: Vec<u8>) -> Self {
-        // println!("\nsrc : {:?}", src);
         let mask = src[0];
-
-        // println!("mask is {:#x}", mask);
 
         let mask = mask >> 4;
         let extended_length: bool = match mask & 0b0001 {
@@ -684,8 +670,6 @@ impl From<Vec<u8>> for PathAttribute {
         };
 
         let type_code: PathAttributeType = FromPrimitive::from_u8(src[1]).unwrap();
-
-        // println!("type_code is {:#x}, {:?}", src[1], type_code);
 
         let value = match type_code {
             PathAttributeType::Origin => {
@@ -1019,11 +1003,6 @@ impl From<Ipv4Octets> for NLRI {
     fn from(src: Ipv4Octets) -> Self {
         let mut addr = src.octets;
         let plen = addr.remove(0);
-        // println!("plen {:?}", plen);
-        // let blen = (plen as f32 / 8.0).ceil() as usize;
-        // println!("blen {:?}", blen);
-        // let mut t: Vec<u8> = vec![0; 4 - blen];
-        // addr.append(&mut t);
         addr.resize(4, 0);
         let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen).unwrap();
         NLRIBuilder::default().net(net).build().unwrap()
@@ -1034,11 +1013,6 @@ impl From<Ipv6Octets> for NLRI {
     fn from(src: Ipv6Octets) -> Self {
         let mut addr = src.octets;
         let plen = addr.remove(0);
-        // println!("plen {:?}", plen);
-        // let blen = (plen as f32 / 8.0).ceil() as usize;
-        // println!("blen {:?}", blen);
-        // let mut t: Vec<u8> = vec![0; 4 - blen];
-        // addr.append(&mut t);
         addr.resize(16, 0);
         let mut addr6: Vec<u16> = vec![];
         let mut i = 0;
@@ -1319,7 +1293,6 @@ impl Encoder<Vec<u8>> for BGPMessageCodec {
         buf.extend_from_slice(&MARKER);
         buf.extend_from_slice(&len_slice);
         buf.extend_from_slice(data.as_slice());
-        // println!("{:?}", buf);
         Ok(())
     }
 }

@@ -188,8 +188,6 @@ impl BGPSpeaker {
     ) {
         println!("starting rib manager for {:?}", family);
 
-        // tokio::spawn(async move { BGPSpeaker::fib_mgr(speaker, family.clone(), rx.clone()).await });
-
         loop {
             let e = rx.recv().await.unwrap();
             println!("Rib Manager {:?} : Got {:?}", family, e);
@@ -222,12 +220,6 @@ impl BGPSpeaker {
                     }
                 }
             }
-            // let mut f = fib::Fib::new(family.clone()).await;
-            // {
-            //     let s = speaker.lock().await;
-            //     let rib: rib::Rib = s.rib.get(&family).unwrap().clone();
-            //     f.sync(rib).await;
-            // }
             let _ = tx.send(FibEvent::RibUpdated).await;
             sleep(Duration::from_secs(1)).await;
         }

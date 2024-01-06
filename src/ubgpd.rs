@@ -57,8 +57,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    // println!("config: {:?}", config);
-
     let families = config.families.clone();
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(
         config.asn,

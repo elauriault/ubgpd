@@ -207,49 +207,6 @@ impl BGPNeighbor {
             attributes,
         }
     }
-    /*
-        async fn fsm(neighbor: Arc<Mutex<BGPNeighbor>>, speaker: Arc<Mutex<speaker::BGPSpeaker>>) {
-            println!("starting fsm for {:?}", neighbor);
-
-            let (tx, mut rx) = mpsc::channel::<Event>(100);
-
-            let state;
-            let automatic_start;
-            {
-                let mut n = neighbor.lock().await;
-                state = n.attributes.state;
-                automatic_start = n.attributes.allow_automatic_start;
-                n.tx = Some(tx.clone());
-                // let _ = n.ribtx.as_ref().unwrap().send(RibEvent::RibUpdated).await;
-            }
-            match state {
-                BGPState::Idle => match automatic_start {
-                    true => {
-                        BGPNeighbor::process_event(
-                            Event::AutomaticStart,
-                            speaker.clone(),
-                            neighbor.clone(),
-                            None,
-                        )
-                        .await;
-                    }
-                    false => {}
-                },
-                _ => {}
-            }
-
-            loop {
-                match rx.recv().await {
-                    Some(e) => {
-                        BGPNeighbor::process_event(e, speaker.clone(), neighbor.clone(), None).await;
-                    }
-                    None => {
-                        break;
-                    }
-                }
-            }
-        }
-    */
     pub async fn fsm_tcp(
         neighbor: Arc<Mutex<BGPNeighbor>>,
         stream: TcpStream,
@@ -955,48 +912,6 @@ impl BGPNeighbor {
                     .await;
             }
         }
-        // {
-        //     // let mut s = s.lock().await;
-        //     // let rib = s.rib.get_mut(&af).unwrap();
-        //     // for nlri in nlris {
-        //     //     match rib.get_mut(&nlri) {
-        //     //         None => {
-        //     //             rib.insert(nlri, vec![ra.clone()]);
-        //     //         }
-        //     //         Some(attributes) => {
-        //     //             attributes.push(ra.clone());
-        //     //         }
-        //     //     }
-        //     // }
-        //     let n;
-        //     // let ribtx;
-        //     {
-        //         let nb = nb.lock().await;
-        //         n = nb.router_id;
-        //         // ribtx = nb.ribtx.clone();
-        //     }
-        //     // let mut rib = s.rib.get(&af).unwrap().clone();
-        //     // for nlri in withdrawn {
-        //     //     match rib.get_mut(&nlri) {
-        //     //         None => {}
-        //     //         Some(attributes) => {
-        //     //             attributes.retain(|x| !x.from_neighbor(n));
-        //     //         }
-        //     //     }
-        //     // }
-        //     // println!("\nRIB {:?} : {:?}\n", af, rib);
-        // }
-        // {
-        //     let nb = nb.lock().await;
-        //     let _ = nb
-        //         .ribtx
-        //         .get(&af)
-        //         .unwrap()
-        //         // .as_ref()
-        //         // .unwrap()
-        //         .send(speaker::RibEvent::RibUpdated)
-        //         .await;
-        // }
     }
 
     async fn collision_detection(
