@@ -23,9 +23,17 @@ use crate::neighbor;
 use crate::rib;
 
 #[derive(Debug)]
+pub struct Update {
+    pub added: Option<rib::RibUpdate>,
+    pub withdrawn: Option<rib::RibUpdate>,
+    pub rid: u32,
+}
+
+#[derive(Debug)]
 pub enum RibEvent {
-    AddRoutes(rib::RibUpdate),
-    WithdrawRoutes(rib::RibUpdate),
+    // AddRoutes(rib::RibUpdate),
+    // WithdrawRoutes(rib::RibUpdate),
+    UpdateRoutes(Update),
 }
 
 #[derive(Debug)]
@@ -43,6 +51,7 @@ pub struct BGPSpeaker {
     local_port: u16,
     families: Vec<bgp::AddressFamily>,
     pub rib: HashMap<bgp::AddressFamily, Arc<Mutex<rib::Rib>>>,
+    pub fib: HashMap<bgp::AddressFamily, Arc<Mutex<fib::Fib>>>,
     pub ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<RibEvent>>,
     pub neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
 }
@@ -64,6 +73,7 @@ impl BGPSpeaker {
             .local_port(local_port)
             .families(families)
             .rib(HashMap::new())
+            .fib(HashMap::new())
             .ribtx(HashMap::new())
             .neighbors(vec![])
             .build()
@@ -131,14 +141,17 @@ impl BGPSpeaker {
             let mut speaker = speaker.lock().await;
             for af in speaker.families.clone() {
                 let rib = Arc::new(Mutex::new(HashMap::new()));
+                let fib = Arc::new(Mutex::new(fib::Fib::new(af.clone()).await));
                 let (rib_tx, rib_rx) = mpsc::channel::<RibEvent>(100);
                 let (fib_tx, fib_rx) = mpsc::channel::<FibEvent>(100);
                 speaker.rib.insert(af.clone(), rib.clone());
                 speaker.ribtx.insert(af.clone(), rib_tx);
+                speaker.fib.insert(af.clone(), fib.clone());
                 let r1 = rib.clone();
-                let a1 = af.clone();
-                tokio::spawn(async move { BGPSpeaker::rib_mgr(r1, a1, rib_rx, fib_tx).await });
-                tokio::spawn(async move { BGPSpeaker::fib_mgr(rib, af, fib_rx).await });
+                let f1 = fib.clone();
+                let asn = speaker.local_asn.clone();
+                tokio::spawn(async move { BGPSpeaker::rib_mgr(r1, f1, asn, rib_rx, fib_tx).await });
+                tokio::spawn(async move { BGPSpeaker::fib_mgr(fib, rib, af, fib_rx).await });
             }
         }
 
@@ -182,50 +195,107 @@ impl BGPSpeaker {
 
     async fn rib_mgr(
         rib: Arc<Mutex<rib::Rib>>,
-        family: AddressFamily,
+        fib: Arc<Mutex<fib::Fib>>,
+        asn: u16,
         mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
         tx: tokio::sync::mpsc::Sender<FibEvent>,
     ) {
-        println!("starting rib manager for {:?}", family);
+        // println!("starting rib manager for {:?}", family);
 
         loop {
             let e = rx.recv().await.unwrap();
-            println!("Rib Manager {:?} : Got {:?}", family, e);
+            println!("Rib Manager got {:?}", e);
             match e {
-                RibEvent::AddRoutes(routes) => {
-                    println!("Adding routes {:?}", routes);
-                    let mut rib = rib.lock().await;
-                    for nlri in routes.nlris {
-                        match rib.get_mut(&nlri) {
-                            None => {
-                                rib.insert(nlri, vec![routes.attributes.clone()]);
-                            }
-                            Some(attributes) => {
-                                attributes.push(routes.attributes.clone());
+                RibEvent::UpdateRoutes(msg) => {
+                    let mut modified = vec![];
+                    match msg.added {
+                        None => {}
+                        Some(routes) => {
+                            println!("Adding routes {:?} from {:?}", routes, msg.rid);
+                            let mut rib = rib.lock().await;
+                            for nlri in routes.nlris {
+                                match rib.get_mut(&nlri) {
+                                    None => {
+                                        if routes.attributes.is_valid(asn, fib.clone()).await {
+                                            rib.insert(
+                                                nlri.clone(),
+                                                vec![routes.attributes.clone()],
+                                            );
+                                            modified.push(nlri.clone());
+                                        }
+                                    }
+                                    Some(attributes) => {
+                                        if routes.attributes > *attributes.first().unwrap() {
+                                            attributes.clear();
+                                            if routes.attributes.is_valid(asn, fib.clone()).await {
+                                                attributes.push(routes.attributes.clone());
+                                                modified.push(nlri.clone());
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-                RibEvent::WithdrawRoutes(routes) => {
-                    println!("Withdrawing routes {:?}", routes);
-                    let mut rib = rib.lock().await;
-                    let n = routes.attributes.peer_rid;
-                    for nlri in routes.nlris {
-                        match rib.get_mut(&nlri) {
-                            None => {}
-                            Some(attributes) => {
-                                attributes.retain(|x| !x.from_neighbor(n));
+                    };
+                    match msg.withdrawn {
+                        None => {}
+                        Some(routes) => {
+                            println!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
+                            let mut rib = rib.lock().await;
+                            let n = routes.attributes.peer_rid;
+                            for nlri in routes.nlris {
+                                match rib.get_mut(&nlri) {
+                                    None => {}
+                                    Some(attributes) => {
+                                        let initial_best = attributes.first().unwrap().clone();
+                                        attributes.retain(|x| !x.from_neighbor(n));
+                                        let new_best = attributes.first().unwrap();
+                                        if initial_best != *new_best {
+                                            modified.push(nlri.clone());
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                }
+                    };
+                } // RibEvent::AddRoutes(routes) => {
+                  //     println!("Adding routes {:?}", routes);
+                  //     let mut rib = rib.lock().await;
+                  //     for nlri in routes.nlris {
+                  //         match rib.get_mut(&nlri) {
+                  //             None => {
+                  //                 rib.insert(nlri, vec![routes.attributes.clone()]);
+                  //             }
+                  //             Some(attributes) => {
+                  //                 attributes.push(routes.attributes.clone());
+                  //             }
+                  //         }
+                  //     }
+                  // }
+                  // RibEvent::WithdrawRoutes(routes) => {
+                  //     println!("Withdrawing routes {:?}", routes);
+                  //     let mut rib = rib.lock().await;
+                  //     let n = routes.attributes.peer_rid;
+                  //     for nlri in routes.nlris {
+                  //         match rib.get_mut(&nlri) {
+                  //             None => {}
+                  //             Some(attributes) => {
+                  //                 attributes.retain(|x| !x.from_neighbor(n));
+                  //             }
+                  //         }
+                  //     }
+                  // }
             }
+            //
+            // HERE WE MEED TO UPDATE THE NEIGHBORS WITH THE CONTENT of modified
+            //
             let _ = tx.send(FibEvent::RibUpdated).await;
             sleep(Duration::from_secs(1)).await;
         }
     }
 
     async fn fib_mgr(
+        fib: Arc<Mutex<fib::Fib>>,
         rib: Arc<Mutex<rib::Rib>>,
         family: AddressFamily,
         mut rx: tokio::sync::mpsc::Receiver<FibEvent>,
@@ -237,11 +307,14 @@ impl BGPSpeaker {
             match e {
                 FibEvent::RibUpdated => {
                     println!("Fib Manager {:?} : Got {:?}", family, e);
-                    let mut f = fib::Fib::new(family.clone()).await;
-                    f.sync(rib.clone()).await;
+                    let mut fib = fib.lock().await;
+                    fib.refresh(family.clone()).await;
+                    fib.sync(rib.clone()).await;
                 }
             }
             sleep(Duration::from_secs(1)).await;
+            let mut fib = fib.lock().await;
+            fib.refresh(family.clone()).await;
         }
     }
 }
