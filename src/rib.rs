@@ -1,4 +1,5 @@
 use async_std::sync::{Arc, Mutex};
+// use netlink_packet_route::AddressFamily;
 // use ipnet::IpAdd;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -7,8 +8,9 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use crate::bgp;
+use crate::bgp::Flatten;
+use crate::fib;
 use crate::neighbor;
-// use crate::speaker;
 
 #[derive(Debug, Eq, Clone)]
 pub struct RouteAttributes {
@@ -30,12 +32,32 @@ pub struct RibUpdate {
     pub attributes: RouteAttributes,
 }
 
+trait Reachable {
+    async fn is_reachable(&self, fib: Arc<Mutex<fib::Fib>>) -> bool;
+}
+
+impl Reachable for IpAddr {
+    async fn is_reachable(&self, fib: Arc<Mutex<fib::Fib>>) -> bool {
+        let fib = fib.lock().await;
+        fib.has_route(*self).await
+    }
+}
+
 impl RouteAttributes {
     pub fn from_neighbor(&self, n: u32) -> bool {
         if self.peer_rid == n {
             return true;
         }
         false
+    }
+    pub async fn is_valid(&self, asn: u16, fib: Arc<Mutex<fib::Fib>>) -> bool {
+        if self.as_path.flatten_aspath().contains(&asn) {
+            return false;
+        }
+        if !self.next_hop.is_reachable(fib).await {
+            return false;
+        }
+        true
     }
     pub async fn new(
         src: Vec<bgp::PathAttribute>,

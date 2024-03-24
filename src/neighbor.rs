@@ -12,7 +12,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use crate::bgp::{self, AddressFamily, PathAttributeType, PathAttributeValue};
-use crate::rib::{self, RibUpdate};
+use crate::rib::{self, RibUpdate, RouteAttributes};
 use crate::speaker;
 
 #[derive(Debug, Clone, Copy)]
@@ -98,8 +98,8 @@ pub struct BGPNeighbor {
     // connect_retry_time: Option<u16>,
     capabilities_advertised: Capabilities,
     capabilities_received: Capabilities,
+    adjrib: HashMap<bgp::AddressFamily, rib::Rib>,
     tx: Option<tokio::sync::mpsc::Sender<Event>>,
-    // ribtx: Option<tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     attributes: BGPSessionAttributes,
 }
@@ -202,6 +202,7 @@ impl BGPNeighbor {
             router_id: 0,
             capabilities_advertised,
             capabilities_received: Capabilities::default(),
+            adjrib: HashMap::default(),
             tx,
             ribtx,
             attributes,
@@ -841,6 +842,44 @@ impl BGPNeighbor {
         n.attributes.keepalive_timer = 0;
     }
 
+    async fn adjrib_add(&mut self, af: AddressFamily, routes: RibUpdate) {
+        println!("Adding routes to ajdrib {:?} : {:?}", af, routes);
+        match self.adjrib.get_mut(&af) {
+            None => {
+                let mut rib = rib::Rib::default();
+                for nlri in routes.nlris {
+                    rib.insert(nlri, vec![routes.attributes.clone()]);
+                }
+                self.adjrib.insert(af.clone(), rib);
+            }
+            Some(rib) => {
+                for nlri in routes.nlris {
+                    match rib.get_mut(&nlri) {
+                        None => {
+                            rib.insert(nlri, vec![routes.attributes.clone()]);
+                        }
+                        Some(attributes) => {
+                            attributes.clear();
+                            attributes.push(routes.attributes.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn adjrib_withdraw(&mut self, af: AddressFamily, routes: RibUpdate) {
+        println!("Removing routes from adjrib {:?} : {:?}", af, routes);
+        match self.adjrib.get_mut(&af) {
+            None => {}
+            Some(rib) => {
+                for nlri in routes.nlris {
+                    rib.remove(&nlri);
+                }
+            }
+        }
+    }
+
     async fn handle_update(
         m: bgp::BGPUpdateMessage,
         s: Arc<Mutex<speaker::BGPSpeaker>>,
@@ -883,34 +922,54 @@ impl BGPNeighbor {
             local_asn = s.local_asn;
         }
         let attributes =
-            rib::RouteAttributes::new(m.path_attributes.clone(), local_asn.into(), nb.clone(), nh)
-                .await;
+            RouteAttributes::new(m.path_attributes.clone(), local_asn.into(), nb.clone(), nh).await;
+
+        let mut msg = speaker::Update {
+            added: None,
+            withdrawn: None,
+            rid: 0,
+        };
+
         if withdrawn.len() > 0 {
             let updates = RibUpdate {
                 nlris: withdrawn,
                 attributes: attributes.clone(),
             };
+            msg.added = Some(updates.clone());
             {
-                let nb = nb.lock().await;
-                let _ = nb
-                    .ribtx
-                    .get(&af)
-                    .unwrap()
-                    .send(speaker::RibEvent::WithdrawRoutes(updates))
-                    .await;
+                let mut nb = nb.lock().await;
+                nb.adjrib_add(af.clone(), updates.clone()).await;
+                // let _ = nb
+                //     .ribtx
+                //     .get(&af)
+                //     .unwrap()
+                //     .send(speaker::RibEvent::WithdrawRoutes(updates))
+                //     .await;
             }
         }
         if nlris.len() > 0 {
             let updates = RibUpdate { nlris, attributes };
+            msg.withdrawn = Some(updates.clone());
             {
-                let nb = nb.lock().await;
-                let _ = nb
-                    .ribtx
-                    .get(&af)
-                    .unwrap()
-                    .send(speaker::RibEvent::AddRoutes(updates))
-                    .await;
+                let mut nb = nb.lock().await;
+                nb.adjrib_withdraw(af.clone(), updates.clone()).await;
+                // let _ = nb
+                //     .ribtx
+                //     .get(&af)
+                //     .unwrap()
+                //     .send(speaker::RibEvent::AddRoutes(updates))
+                //     .await;
             }
+        }
+        {
+            let nb = nb.lock().await;
+            msg.rid = nb.router_id;
+            let _ = nb
+                .ribtx
+                .get(&af)
+                .unwrap()
+                .send(speaker::RibEvent::UpdateRoutes(msg))
+                .await;
         }
     }
 

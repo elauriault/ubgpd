@@ -946,6 +946,20 @@ impl ASPATHSegment {
 
 pub type ASPATH = Vec<ASPATHSegment>;
 
+pub trait Flatten {
+    fn flatten_aspath(&self) -> Vec<u16>;
+}
+
+impl Flatten for ASPATH {
+    fn flatten_aspath(&self) -> Vec<u16> {
+        let mut v: Vec<u16> = vec![];
+        for segment in self {
+            v.append(&mut segment.as_list.clone());
+        }
+        v
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct AggregatorValue {
     last_as: u16,

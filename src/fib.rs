@@ -2,6 +2,7 @@ use async_std::sync::{Arc, Mutex};
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use std::net::IpAddr;
 // use netlink_packet::route::RouteProtool;
 // use netlink_packet_route::link::nlas::Nla as lnla;
 use netlink_packet_route::link::LinkAttribute;
@@ -10,7 +11,6 @@ use netlink_packet_route::link::LinkAttribute;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
 use rtnetlink::{new_connection, Handle, IpVersion};
 // use std::error::Error;
-use std::net::IpAddr;
 
 use crate::bgp::{AddressFamily, AFI};
 use crate::rib;
@@ -82,19 +82,20 @@ impl FibEntry {
 
 #[derive(Debug, PartialEq)]
 pub struct Fib {
-    af: AddressFamily,
+    // af: AddressFamily,
     routes: Vec<FibEntry>,
 }
 
 impl Fib {
     pub async fn new(af: AddressFamily) -> Self {
-        let mut fib = Fib { af, routes: vec![] };
-        fib.refresh().await;
+        // let mut fib = Fib { af, routes: vec![] };
+        let mut fib = Fib { routes: vec![] };
+        fib.refresh(af).await;
         fib
     }
 
-    async fn refresh(&mut self) {
-        let v = self.get_routes().await;
+    pub async fn refresh(&mut self, af: AddressFamily) {
+        let v = self.get_routes(af).await;
 
         self.routes = v;
     }
@@ -105,8 +106,8 @@ impl Fib {
         {
             let rib = rib.lock().await;
             for (n, a) in rib.iter() {
-                let mut a = a.clone();
-                let _ = a.sort();
+                let a = a.clone();
+                // a.sort();
                 let a = a.first().unwrap();
                 println!("{:?} : {:?}", n, a);
                 match self
@@ -124,6 +125,18 @@ impl Fib {
             }
         }
     }
+
+    pub async fn has_route(&self, addr: IpAddr) -> bool {
+        let routes = self.routes.clone();
+        routes
+            .into_iter()
+            .find(|fe| match fe.prefix {
+                None => false,
+                Some(prefix) => prefix.contains(&addr),
+            })
+            .is_some()
+    }
+
     async fn find_route(
         &mut self,
         subnet: IpNet,
@@ -182,10 +195,10 @@ impl Fib {
         route.del(entry.rm).execute().await.unwrap();
     }
 
-    async fn get_routes(&mut self) -> Vec<FibEntry> {
+    async fn get_routes(&mut self, af: AddressFamily) -> Vec<FibEntry> {
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
-        let mut routes = match self.af.afi {
+        let mut routes = match af.afi {
             AFI::Ipv4 => handle.route().get(IpVersion::V4).execute(),
             AFI::Ipv6 => handle.route().get(IpVersion::V6).execute(),
         };
