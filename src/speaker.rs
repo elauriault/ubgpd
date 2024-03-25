@@ -16,7 +16,7 @@ use tokio::time::{sleep, Duration};
 // use tokio_util::codec::Framed;
 
 use crate::bgp;
-use crate::bgp::AddressFamily;
+// use crate::bgp::AddressFamily;
 use crate::config;
 use crate::fib;
 use crate::neighbor;
@@ -146,12 +146,12 @@ impl BGPSpeaker {
                 let (fib_tx, fib_rx) = mpsc::channel::<FibEvent>(100);
                 speaker.rib.insert(af.clone(), rib.clone());
                 speaker.ribtx.insert(af.clone(), rib_tx);
-                speaker.fib.insert(af.clone(), fib.clone());
+                speaker.fib.insert(af, fib.clone());
                 let r1 = rib.clone();
                 let f1 = fib.clone();
                 let asn = speaker.local_asn.clone();
                 tokio::spawn(async move { BGPSpeaker::rib_mgr(r1, f1, asn, rib_rx, fib_tx).await });
-                tokio::spawn(async move { BGPSpeaker::fib_mgr(fib, rib, af, fib_rx).await });
+                tokio::spawn(async move { BGPSpeaker::fib_mgr(fib, rib, fib_rx).await });
             }
         }
 
@@ -195,7 +195,7 @@ impl BGPSpeaker {
 
     async fn rib_mgr(
         rib: Arc<Mutex<rib::Rib>>,
-        fib: Arc<Mutex<fib::Fib>>,
+        _fib: Arc<Mutex<fib::Fib>>,
         asn: u16,
         mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
         tx: tokio::sync::mpsc::Sender<FibEvent>,
@@ -216,7 +216,7 @@ impl BGPSpeaker {
                             for nlri in routes.nlris {
                                 match rib.get_mut(&nlri) {
                                     None => {
-                                        if routes.attributes.is_valid(asn, fib.clone()).await {
+                                        if routes.attributes.is_valid(asn).await {
                                             rib.insert(
                                                 nlri.clone(),
                                                 vec![routes.attributes.clone()],
@@ -226,9 +226,10 @@ impl BGPSpeaker {
                                     }
                                     Some(attributes) => {
                                         if routes.attributes > *attributes.first().unwrap() {
-                                            attributes.clear();
-                                            if routes.attributes.is_valid(asn, fib.clone()).await {
+                                            if routes.attributes.is_valid(asn).await {
                                                 attributes.push(routes.attributes.clone());
+                                                attributes.sort();
+                                                attributes.reverse();
                                                 modified.push(nlri.clone());
                                             }
                                         }
@@ -246,9 +247,10 @@ impl BGPSpeaker {
                                 match rib.get_mut(&nlri) {
                                     None => {}
                                     Some(attributes) => {
-                                        if attributes.first().unwrap().peer_rid
-                                            == routes.attributes.peer_rid
-                                        {
+                                        attributes.retain(|a| {
+                                            !a.from_neighbor(routes.attributes.peer_rid)
+                                        });
+                                        if attributes.len() == 0 {
                                             rib.remove(&nlri);
                                         }
                                     }
@@ -295,24 +297,23 @@ impl BGPSpeaker {
     async fn fib_mgr(
         fib: Arc<Mutex<fib::Fib>>,
         rib: Arc<Mutex<rib::Rib>>,
-        family: AddressFamily,
         mut rx: tokio::sync::mpsc::Receiver<FibEvent>,
     ) {
-        println!("starting fib manager for {:?}", family);
+        println!("starting fib manager");
 
         loop {
             let e = rx.recv().await.unwrap();
             match e {
                 FibEvent::RibUpdated => {
-                    println!("Fib Manager {:?} : Got {:?}", family, e);
+                    println!("Fib Manager : Got {:?}", e);
                     let mut fib = fib.lock().await;
-                    fib.refresh(family.clone()).await;
+                    fib.refresh().await;
                     fib.sync(rib.clone()).await;
                 }
             }
             sleep(Duration::from_secs(1)).await;
             let mut fib = fib.lock().await;
-            fib.refresh(family.clone()).await;
+            fib.refresh().await;
         }
     }
 }

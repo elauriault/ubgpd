@@ -13,7 +13,7 @@ use rtnetlink::{new_connection, Handle, IpVersion};
 // use std::error::Error;
 
 use crate::bgp::{AddressFamily, AFI};
-use crate::rib;
+use crate::rib::{self};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FibEntry {
@@ -82,20 +82,20 @@ impl FibEntry {
 
 #[derive(Debug, PartialEq)]
 pub struct Fib {
-    // af: AddressFamily,
+    af: AddressFamily,
     routes: Vec<FibEntry>,
 }
 
 impl Fib {
     pub async fn new(af: AddressFamily) -> Self {
-        // let mut fib = Fib { af, routes: vec![] };
-        let mut fib = Fib { routes: vec![] };
-        fib.refresh(af).await;
+        let mut fib = Fib { af, routes: vec![] };
+        // let mut fib = Fib { routes: vec![] };
+        fib.refresh().await;
         fib
     }
 
-    pub async fn refresh(&mut self, af: AddressFamily) {
-        let v = self.get_routes(af).await;
+    pub async fn refresh(&mut self) {
+        let v = self.get_routes(self.af.clone()).await;
 
         self.routes = v;
     }
@@ -106,27 +106,29 @@ impl Fib {
         {
             let rib = rib.lock().await;
             for (n, a) in rib.iter() {
-                let a = a.clone();
-                // a.sort();
-                let a = a.first().unwrap();
-                println!("{:?} : {:?}", n, a);
-                match self
-                    .find_route(n.clone().into(), a.next_hop, handle.clone())
-                    .await
-                {
-                    Some(_t) => {
-                        println!("Route {:?} already present, skipping it", n);
+                match a.iter().find(|a| self.has_route(a.next_hop)) {
+                    Some(a) => {
+                        println!("{:?} : {:?}", n, a);
+                        match self
+                            .find_route(n.clone().into(), a.next_hop, handle.clone())
+                            .await
+                        {
+                            Some(_t) => {
+                                println!("Route {:?} already present, skipping it", n);
+                            }
+                            None => {
+                                println!("Route {:?}  is not present, adding it", n);
+                                self.add_route(n.into(), a.next_hop, handle.clone()).await;
+                            }
+                        }
                     }
-                    None => {
-                        println!("Route {:?}  is not present, adding it", n);
-                        self.add_route(n.into(), a.next_hop, handle.clone()).await;
-                    }
+                    None => {}
                 }
             }
         }
     }
 
-    pub async fn has_route(&self, addr: IpAddr) -> bool {
+    pub fn has_route(&self, addr: IpAddr) -> bool {
         let routes = self.routes.clone();
         routes
             .into_iter()
