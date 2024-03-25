@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use crate::bgp;
 use crate::bgp::Flatten;
-use crate::fib;
+// use crate::fib;
 use crate::neighbor;
 
 #[derive(Debug, Eq, Clone)]
@@ -32,17 +32,6 @@ pub struct RibUpdate {
     pub attributes: RouteAttributes,
 }
 
-trait Reachable {
-    async fn is_reachable(&self, fib: Arc<Mutex<fib::Fib>>) -> bool;
-}
-
-impl Reachable for IpAddr {
-    async fn is_reachable(&self, fib: Arc<Mutex<fib::Fib>>) -> bool {
-        let fib = fib.lock().await;
-        fib.has_route(*self).await
-    }
-}
-
 impl RouteAttributes {
     pub fn from_neighbor(&self, n: u32) -> bool {
         if self.peer_rid == n {
@@ -50,11 +39,8 @@ impl RouteAttributes {
         }
         false
     }
-    pub async fn is_valid(&self, asn: u16, fib: Arc<Mutex<fib::Fib>>) -> bool {
+    pub async fn is_valid(&self, asn: u16) -> bool {
         if self.as_path.flatten_aspath().contains(&asn) {
-            return false;
-        }
-        if !self.next_hop.is_reachable(fib).await {
             return false;
         }
         true
