@@ -242,16 +242,14 @@ impl BGPSpeaker {
                         Some(routes) => {
                             println!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
                             let mut rib = rib.lock().await;
-                            let n = routes.attributes.peer_rid;
                             for nlri in routes.nlris {
                                 match rib.get_mut(&nlri) {
                                     None => {}
                                     Some(attributes) => {
-                                        let initial_best = attributes.first().unwrap().clone();
-                                        attributes.retain(|x| !x.from_neighbor(n));
-                                        let new_best = attributes.first().unwrap();
-                                        if initial_best != *new_best {
-                                            modified.push(nlri.clone());
+                                        if attributes.first().unwrap().peer_rid
+                                            == routes.attributes.peer_rid
+                                        {
+                                            rib.remove(&nlri);
                                         }
                                     }
                                 }
