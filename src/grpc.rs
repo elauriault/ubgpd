@@ -47,10 +47,10 @@ impl Config for GrpcServer {
                 for n in neighbors {
                     let n = n.lock().await;
                     let entry = NeighborEntry {
-                        ip: n.remote_ip.to_string(),
-                        port: n.remote_port as u32,
-                        asn: n.remote_asn as u32,
-                        routerid: n.router_id,
+                        ip: n.remote_ip.unwrap().to_string(),
+                        port: n.remote_port.unwrap() as u32,
+                        asn: n.remote_asn.unwrap() as u32,
+                        routerid: n.remote_rid.unwrap(),
                     };
                     entries.push(entry);
                 }
@@ -59,12 +59,12 @@ impl Config for GrpcServer {
                 let ip: IpAddr = ip.parse().unwrap();
                 for n in neighbors {
                     let n = n.lock().await;
-                    if ip == n.remote_ip {
+                    if ip == n.remote_ip.unwrap() {
                         let entry = NeighborEntry {
-                            ip: n.remote_ip.to_string(),
-                            port: n.remote_port as u32,
-                            asn: n.remote_asn as u32,
-                            routerid: n.router_id,
+                            ip: n.remote_ip.unwrap().to_string(),
+                            port: n.remote_port.unwrap() as u32,
+                            asn: n.remote_asn.unwrap() as u32,
+                            routerid: n.remote_rid.unwrap(),
                         };
                         entries.push(entry);
                     }

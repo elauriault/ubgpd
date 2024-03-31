@@ -7,12 +7,12 @@ use std::net::IpAddr;
 // use std::net::Ipv4Addr;
 use std::time::Instant;
 
-use crate::bgp;
 use crate::bgp::Flatten;
+use crate::bgp::{self, PathAttribute};
 // use crate::fib;
 use crate::neighbor;
 
-#[derive(Debug, Eq, Clone)]
+#[derive(Debug, Eq, Clone, Hash)]
 pub struct RouteAttributes {
     as_path: bgp::ASPATH,
     origin: bgp::OriginType,
@@ -33,18 +33,36 @@ pub struct RibUpdate {
 }
 
 impl RouteAttributes {
+    pub fn prepend(&mut self, asn: u16, times: u8) -> bgp::ASPATH {
+        let sequence = bgp::ASPATHSegment {
+            path_type: bgp::ASPATHSegmentType::AsSequence,
+            as_list: [asn, times.into()].to_vec(),
+        };
+        self.as_path.insert(0, sequence);
+        self.as_path.clone()
+    }
+
+    pub fn from_ibgp(&self) -> bool {
+        if self.peer_type == PeeringType::Ibgp {
+            return true;
+        }
+        false
+    }
+
     pub fn from_neighbor(&self, n: u32) -> bool {
         if self.peer_rid == n {
             return true;
         }
         false
     }
+
     pub async fn is_valid(&self, asn: u16) -> bool {
         if self.as_path.flatten_aspath().contains(&asn) {
             return false;
         }
         true
     }
+
     pub async fn new(
         src: Vec<bgp::PathAttribute>,
         local_asn: u32,
@@ -89,9 +107,9 @@ impl RouteAttributes {
         let peer_ip;
         {
             let nb = nb.lock().await;
-            remote_asn = nb.remote_asn;
-            peer_rid = nb.router_id;
-            peer_ip = nb.remote_ip;
+            remote_asn = nb.remote_asn.unwrap();
+            peer_rid = nb.remote_rid.unwrap();
+            peer_ip = nb.remote_ip.unwrap();
         }
 
         let peer_type;
@@ -120,7 +138,37 @@ impl RouteAttributes {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord)]
+impl Into<Vec<PathAttribute>> for RouteAttributes {
+    fn into(self) -> Vec<PathAttribute> {
+        let mut ret = vec![];
+        // let mut mpnh = None;
+        match self.next_hop {
+            IpAddr::V6(_ip6) => {
+                // mpnh = Some(ip6);
+            }
+            IpAddr::V4(ip4) => {
+                ret.push(PathAttribute::nexthop(ip4));
+            }
+        }
+        ret.push(PathAttribute::origin(self.origin));
+        ret.push(PathAttribute::aspath(self.as_path));
+        match self.local_pref {
+            Some(pref) => {
+                ret.push(PathAttribute::local_pref(pref));
+            }
+            None => {}
+        }
+        match self.multi_exit_disc {
+            Some(med) => {
+                ret.push(PathAttribute::med(med));
+            }
+            None => {}
+        }
+        ret
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
 pub enum PathType {
     External,
     Internal,
@@ -129,7 +177,7 @@ pub enum PathType {
     // Local,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
 pub enum PeeringType {
     Ibgp,
     Ebgp,
