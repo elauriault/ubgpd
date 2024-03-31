@@ -129,9 +129,8 @@ impl Fib {
     }
 
     pub fn has_route(&self, addr: IpAddr) -> bool {
-        let routes = self.routes.clone();
-        routes
-            .into_iter()
+        self.routes
+            .iter()
             .find(|fe| match fe.prefix {
                 None => false,
                 Some(prefix) => prefix.contains(&addr),

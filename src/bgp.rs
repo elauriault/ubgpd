@@ -644,6 +644,92 @@ pub struct PathAttribute {
     pub value: PathAttributeValue,
 }
 
+impl PathAttribute {
+    pub fn origin(origin: OriginType) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::Origin,
+            value: PathAttributeValue::Origin(origin),
+            optional: false,
+            transitive: true,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn aspath(aspath: ASPATH) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::AsPath,
+            value: PathAttributeValue::AsPath(aspath),
+            optional: false,
+            transitive: true,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn nexthop(nh: Ipv4Addr) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::NextHop,
+            value: PathAttributeValue::NextHop(nh),
+            optional: false,
+            transitive: true,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn med(med: u32) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::MultiExitDisc,
+            value: PathAttributeValue::MultiExitDisc(med),
+            optional: true,
+            transitive: false,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn local_pref(pref: u32) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::LocalPref,
+            value: PathAttributeValue::LocalPref(pref),
+            optional: true,
+            transitive: false,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn aggregator(last_as: u16, aggregator: Ipv4Addr) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::Aggregator,
+            value: PathAttributeValue::Aggregator(AggregatorValue {
+                last_as,
+                aggregator,
+            }),
+            optional: true,
+            transitive: true,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn mp_reachable(af: AddressFamily, nh: IpAddr, nlris: Vec<NLRI>) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::MPReachableNLRI,
+            value: PathAttributeValue::MPReachableNLRI(MPNLRI { af, nh, nlris }),
+            optional: true,
+            transitive: false,
+            partial: false,
+            extended_length: false,
+        }
+    }
+    pub fn mp_unreachable(af: AddressFamily, nh: IpAddr, nlris: Vec<NLRI>) -> Self {
+        PathAttribute {
+            type_code: PathAttributeType::MPUnreachableNLRI,
+            value: PathAttributeValue::MPUnreachableNLRI(MPNLRI { af, nh, nlris }),
+            optional: true,
+            transitive: false,
+            partial: false,
+            extended_length: false,
+        }
+    }
+}
+
 impl From<Vec<u8>> for PathAttribute {
     fn from(src: Vec<u8>) -> Self {
         let mask = src[0];
@@ -895,15 +981,15 @@ pub enum PathAttributeValue {
     ExtCommunities,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd, Ord, Hash)]
 pub enum OriginType {
     IGP = 0,
     EGP,
     INCOMPLETE,
 }
 
-#[derive(Debug, Eq, Clone, FromPrimitive)]
-enum ASPATHSegmentType {
+#[derive(Debug, Eq, Clone, FromPrimitive, Hash)]
+pub enum ASPATHSegmentType {
     AsSet = 1,
     AsSequence,
 }
@@ -914,10 +1000,10 @@ impl PartialEq for ASPATHSegmentType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ASPATHSegment {
-    path_type: ASPATHSegmentType,
-    as_list: Vec<u16>,
+    pub path_type: ASPATHSegmentType,
+    pub as_list: Vec<u16>,
 }
 
 impl Into<Vec<u8>> for ASPATHSegment {
@@ -966,7 +1052,7 @@ pub struct AggregatorValue {
     aggregator: Ipv4Addr,
 }
 
-#[derive(Builder, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Builder, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 #[builder(setter(into))]
 pub struct NLRI {
     net: IpNet,
@@ -1052,8 +1138,6 @@ impl From<Ipv6Octets> for NLRI {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MPNLRI {
     pub af: AddressFamily,
-    // pub afi: AFI,
-    // pub safi: SAFI,
     pub nh: IpAddr,
     pub nlris: Vec<NLRI>,
 }

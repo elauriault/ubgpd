@@ -86,9 +86,13 @@ impl BGPSpeaker {
         ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<RibEvent>>,
     ) {
         let n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
-            config.ip.parse().unwrap(),
-            config.port,
-            config.asn,
+            None,
+            None,
+            self.local_asn,
+            self.router_id,
+            Some(config.ip.parse().unwrap()),
+            Some(config.port),
+            Some(config.asn),
             config.hold_time.unwrap(),
             config.connect_retry.unwrap(),
             neighbor::BGPState::Idle,
@@ -103,8 +107,14 @@ impl BGPSpeaker {
         let n;
         {
             let mut s = speaker.lock().await;
-            let asn = 0;
-            let port = addr.port();
+            let remote_asn = None;
+            let local_addr = socket.local_addr().unwrap();
+            let local_ip = local_addr.ip();
+            let local_port = local_addr.port();
+            let local_asn = s.local_asn;
+            let local_rid = s.router_id;
+            let remote_ip = addr.ip();
+            let remote_port = addr.port();
             let hold_time = s.hold_time;
             let connect_retry_time = 120; // This is a default value
                                           // for neighbor in s.neighbors.clone() {
@@ -119,9 +129,13 @@ impl BGPSpeaker {
                 let speaker = speaker.lock().await;
                 // let ribtx = speaker.ribtx.clone();
                 n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
-                    addr.ip(),
-                    port,
-                    asn,
+                    Some(local_ip),
+                    Some(local_port),
+                    local_asn,
+                    local_rid,
+                    Some(remote_ip),
+                    Some(remote_port),
+                    remote_asn,
                     hold_time,
                     connect_retry_time,
                     neighbor::BGPState::Active,
@@ -150,7 +164,10 @@ impl BGPSpeaker {
                 let r1 = rib.clone();
                 let f1 = fib.clone();
                 let asn = speaker.local_asn.clone();
-                tokio::spawn(async move { BGPSpeaker::rib_mgr(r1, f1, asn, rib_rx, fib_tx).await });
+                let neighbors = speaker.neighbors.clone();
+                tokio::spawn(async move {
+                    BGPSpeaker::rib_mgr(r1, f1, neighbors, asn, rib_rx, fib_tx).await
+                });
                 tokio::spawn(async move { BGPSpeaker::fib_mgr(fib, rib, fib_rx).await });
             }
         }
@@ -193,9 +210,111 @@ impl BGPSpeaker {
         }
     }
 
+    pub async fn best_reachable(
+        fib: Arc<Mutex<fib::Fib>>,
+        attributes: Vec<rib::RouteAttributes>,
+    ) -> Option<rib::RouteAttributes> {
+        let fib = fib.lock().await;
+        attributes
+            .iter()
+            .find(|a| fib.has_route(a.next_hop))
+            .cloned()
+    }
+
+    async fn loc_rib_added(
+        rib: Arc<Mutex<rib::Rib>>,
+        fib: Arc<Mutex<fib::Fib>>,
+        asn: u16,
+        routes: rib::RibUpdate,
+    ) -> Vec<(bgp::NLRI, Option<rib::RouteAttributes>)> {
+        let mut modified = vec![];
+        // println!("Adding routes {:?} from {:?}", routes, msg.rid);
+        let mut rib = rib.lock().await;
+        for nlri in routes.nlris {
+            match rib.get_mut(&nlri) {
+                None => {
+                    if routes.attributes.is_valid(asn).await {
+                        rib.insert(nlri.clone(), vec![routes.attributes.clone()]);
+                        {
+                            let fib = fib.lock().await;
+                            if fib.has_route(routes.attributes.clone().next_hop) {
+                                modified.push((nlri.clone(), Some(routes.attributes.clone())));
+                            }
+                        }
+                    }
+                }
+                Some(all_attributes) => {
+                    if routes.attributes.is_valid(asn).await {
+                        let previous_best =
+                            Self::best_reachable(fib.clone(), all_attributes.to_vec()).await;
+
+                        all_attributes.push(routes.attributes.clone());
+                        all_attributes.sort();
+                        all_attributes.reverse();
+
+                        {
+                            let fib = fib.lock().await;
+                            if fib.has_route(routes.attributes.clone().next_hop) {
+                                match previous_best {
+                                    None => {
+                                        modified
+                                            .push((nlri.clone(), Some(routes.attributes.clone())));
+                                    }
+                                    Some(best) => {
+                                        if routes.attributes > best {
+                                            modified.push((
+                                                nlri.clone(),
+                                                Some(routes.attributes.clone()),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        modified
+    }
+
+    async fn loc_rib_withdraw(
+        rib: Arc<Mutex<rib::Rib>>,
+        fib: Arc<Mutex<fib::Fib>>,
+        routes: rib::RibUpdate,
+    ) -> Vec<(bgp::NLRI, Option<rib::RouteAttributes>)> {
+        let mut modified = vec![];
+        let mut rib = rib.lock().await;
+        for nlri in routes.nlris {
+            match rib.get_mut(&nlri) {
+                None => {}
+                Some(all_attributes) => {
+                    let previous_best =
+                        Self::best_reachable(fib.clone(), all_attributes.to_vec()).await;
+
+                    all_attributes.retain(|a| !a.from_neighbor(routes.attributes.peer_rid));
+                    if all_attributes.len() == 0 {
+                        rib.remove(&nlri);
+                    }
+
+                    match previous_best {
+                        None => {}
+                        Some(best) => {
+                            if best.peer_rid == routes.attributes.peer_rid {
+                                modified.push((nlri.clone(), None));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        modified
+    }
+
     async fn rib_mgr(
         rib: Arc<Mutex<rib::Rib>>,
-        _fib: Arc<Mutex<fib::Fib>>,
+        fib: Arc<Mutex<fib::Fib>>,
+        neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
         asn: u16,
         mut rx: tokio::sync::mpsc::Receiver<RibEvent>,
         tx: tokio::sync::mpsc::Sender<FibEvent>,
@@ -212,84 +331,35 @@ impl BGPSpeaker {
                         None => {}
                         Some(routes) => {
                             println!("Adding routes {:?} from {:?}", routes, msg.rid);
-                            let mut rib = rib.lock().await;
-                            for nlri in routes.nlris {
-                                match rib.get_mut(&nlri) {
-                                    None => {
-                                        if routes.attributes.is_valid(asn).await {
-                                            rib.insert(
-                                                nlri.clone(),
-                                                vec![routes.attributes.clone()],
-                                            );
-                                            modified.push(nlri.clone());
-                                        }
-                                    }
-                                    Some(attributes) => {
-                                        if routes.attributes > *attributes.first().unwrap() {
-                                            if routes.attributes.is_valid(asn).await {
-                                                attributes.push(routes.attributes.clone());
-                                                attributes.sort();
-                                                attributes.reverse();
-                                                modified.push(nlri.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            let mut added =
+                                Self::loc_rib_added(rib.clone(), fib.clone(), asn, routes.clone())
+                                    .await;
+                            modified.append(&mut added);
                         }
                     };
                     match msg.withdrawn {
                         None => {}
                         Some(routes) => {
                             println!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
-                            let mut rib = rib.lock().await;
-                            for nlri in routes.nlris {
-                                match rib.get_mut(&nlri) {
-                                    None => {}
-                                    Some(attributes) => {
-                                        attributes.retain(|a| {
-                                            !a.from_neighbor(routes.attributes.peer_rid)
-                                        });
-                                        if attributes.len() == 0 {
-                                            rib.remove(&nlri);
-                                        }
-                                    }
-                                }
-                            }
+                            let mut withdraw =
+                                Self::loc_rib_withdraw(rib.clone(), fib.clone(), routes.clone())
+                                    .await;
+                            modified.append(&mut withdraw);
                         }
                     };
-                } // RibEvent::AddRoutes(routes) => {
-                  //     println!("Adding routes {:?}", routes);
-                  //     let mut rib = rib.lock().await;
-                  //     for nlri in routes.nlris {
-                  //         match rib.get_mut(&nlri) {
-                  //             None => {
-                  //                 rib.insert(nlri, vec![routes.attributes.clone()]);
-                  //             }
-                  //             Some(attributes) => {
-                  //                 attributes.push(routes.attributes.clone());
-                  //             }
-                  //         }
-                  //     }
-                  // }
-                  // RibEvent::WithdrawRoutes(routes) => {
-                  //     println!("Withdrawing routes {:?}", routes);
-                  //     let mut rib = rib.lock().await;
-                  //     let n = routes.attributes.peer_rid;
-                  //     for nlri in routes.nlris {
-                  //         match rib.get_mut(&nlri) {
-                  //             None => {}
-                  //             Some(attributes) => {
-                  //                 attributes.retain(|x| !x.from_neighbor(n));
-                  //             }
-                  //         }
-                  //     }
-                  // }
+                    if modified.len() > 0 {
+                        let _ = tx.send(FibEvent::RibUpdated).await;
+                        for n in &neighbors {
+                            let n = n.lock().await;
+                            let tx = n.tx.clone();
+                            tx.unwrap()
+                                .send(neighbor::Event::RibUpdate(modified.clone()))
+                                .await
+                                .unwrap();
+                        }
+                    }
+                }
             }
-            //
-            // HERE WE MEED TO UPDATE THE NEIGHBORS WITH THE CONTENT of modified
-            //
-            let _ = tx.send(FibEvent::RibUpdated).await;
             sleep(Duration::from_secs(1)).await;
         }
     }
