@@ -935,18 +935,6 @@ impl BGPNeighbor {
             _ => {
                 nlris = m.nlri;
                 withdrawn = m.withdrawn_routes;
-                match m
-                    .path_attributes
-                    .clone()
-                    .into_iter()
-                    .find(|x| x.type_code == PathAttributeType::NextHop)
-                    .map(|x| x.value)
-                {
-                    Some(PathAttributeValue::NextHop(n)) => {
-                        nh = Some(IpAddr::V4(n));
-                    }
-                    _ => {}
-                }
             }
         }
         let local_asn;
@@ -971,7 +959,7 @@ impl BGPNeighbor {
             msg.added = Some(updates.clone());
             {
                 let mut nb = nb.lock().await;
-                nb.adjrib_add(af.clone(), updates.clone()).await;
+                nb.adjrib_withdraw(af.clone(), updates.clone()).await;
             }
         }
         if nlris.len() > 0 {
@@ -979,7 +967,7 @@ impl BGPNeighbor {
             msg.withdrawn = Some(updates.clone());
             {
                 let mut nb = nb.lock().await;
-                nb.adjrib_withdraw(af.clone(), updates.clone()).await;
+                nb.adjrib_add(af.clone(), updates.clone()).await;
             }
         }
         {
