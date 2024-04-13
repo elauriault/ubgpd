@@ -913,6 +913,7 @@ impl BGPNeighbor {
         let mut nlris = vec![];
         let mut withdrawn = vec![];
         let mut nh = None;
+        println!("handle_update {:?}", m);
         match m
             .path_attributes
             .clone()
@@ -956,7 +957,7 @@ impl BGPNeighbor {
                 nlris: withdrawn,
                 attributes: attributes.clone(),
             };
-            msg.added = Some(updates.clone());
+            msg.withdrawn = Some(updates.clone());
             {
                 let mut nb = nb.lock().await;
                 nb.adjrib_withdraw(af.clone(), updates.clone()).await;
@@ -964,7 +965,7 @@ impl BGPNeighbor {
         }
         if nlris.len() > 0 {
             let updates = RibUpdate { nlris, attributes };
-            msg.withdrawn = Some(updates.clone());
+            msg.added = Some(updates.clone());
             {
                 let mut nb = nb.lock().await;
                 nb.adjrib_add(af.clone(), updates.clone()).await;
@@ -1081,7 +1082,14 @@ impl BGPNeighbor {
                 None => wd.push(n.clone()),
                 Some(route_attributes) => match updates.get_mut(&route_attributes) {
                     None => {
-                        updates.insert(route_attributes.clone(), vec![n]);
+                        let router_id;
+                        {
+                            let neighbor = neighbor.lock().await;
+                            router_id = neighbor.remote_rid.unwrap();
+                        }
+                        if !route_attributes.from_neighbor(router_id) {
+                            updates.insert(route_attributes.clone(), vec![n]);
+                        }
                     }
                     Some(atr) => {
                         atr.push(n);
@@ -1089,37 +1097,13 @@ impl BGPNeighbor {
                 },
             }
         }
-        match updates.len() {
-            0 => {
-                let body = bgp::BGPUpdateMessageBuilder::default()
-                    .withdrawn_routes(wd)
-                    .path_attributes(vec![])
-                    .nlri(vec![])
-                    .build()
-                    .unwrap();
-                let message: Vec<u8> =
-                    Message::new(bgp::MessageType::UPDATE, bgp::BGPMessageBody::Update(body))
-                        .unwrap()
-                        .into();
-                match server.send(message).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        println!("{:?}", e);
-                        Err(Box::new(e))
-                    }
-                }
-            }
-            _ => {
-                for (mut ra, routes) in updates {
-                    let local_asn;
-                    let local_ip;
-                    let remote_asn;
-                    {
-                        let neighbor = neighbor.lock().await;
-                        local_asn = neighbor.local_asn;
-                        local_ip = neighbor.local_ip.unwrap();
-                        remote_asn = neighbor.remote_asn.unwrap();
-                    }
+        if updates.len() > 0 || wd.len() > 0 {
+            for (mut ra, routes) in updates {
+                {
+                    let neighbor = neighbor.lock().await;
+                    let local_asn = neighbor.local_asn;
+                    let local_ip = neighbor.local_ip.unwrap();
+                    let remote_asn = neighbor.remote_asn.unwrap();
                     if local_asn != remote_asn {
                         ra.next_hop = local_ip;
                         ra.prepend(local_asn, 1);
@@ -1128,29 +1112,29 @@ impl BGPNeighbor {
                             break;
                         }
                     }
-                    let pa: Vec<bgp::PathAttribute> = ra.into();
-                    let body = bgp::BGPUpdateMessageBuilder::default()
-                        .withdrawn_routes(wd.clone())
-                        .path_attributes(pa)
-                        .nlri(routes)
-                        .build()
-                        .unwrap();
-                    let message: Vec<u8> =
-                        Message::new(bgp::MessageType::UPDATE, bgp::BGPMessageBody::Update(body))
-                            .unwrap()
-                            .into();
-                    match server.send(message).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            println!("{:?}", e);
-                            return Err(Box::new(e));
-                        }
-                    };
-                    wd.clear();
                 }
-                Ok(())
+                let pa: Vec<bgp::PathAttribute> = ra.into();
+                let body = bgp::BGPUpdateMessageBuilder::default()
+                    .withdrawn_routes(wd.clone())
+                    .path_attributes(pa)
+                    .nlri(routes)
+                    .build()
+                    .unwrap();
+                let message: Vec<u8> =
+                    Message::new(bgp::MessageType::UPDATE, bgp::BGPMessageBody::Update(body))
+                        .unwrap()
+                        .into();
+                match server.send(message).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!("{:?}", e);
+                        return Err(Box::new(e));
+                    }
+                };
+                wd.clear();
             }
         }
+        Ok(())
     }
 
     async fn send_keepalive(
