@@ -669,7 +669,7 @@ impl BGPNeighbor {
             }
             BGPState::OpenConfirm => {
                 println!("FSM OPENCONFIRM: received {:?}", m.body);
-                BGPNeighbor::process_message_openconfirm(m, nb).await;
+                BGPNeighbor::process_message_openconfirm(m, s, nb).await;
             }
             BGPState::OpenSent => {
                 println!("FSM OPENSENT: received {:?}", m.body);
@@ -800,13 +800,18 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_openconfirm(m: bgp::Message, nb: Arc<Mutex<BGPNeighbor>>) {
+    async fn process_message_openconfirm(
+        m: bgp::Message,
+        s: Arc<Mutex<speaker::BGPSpeaker>>,
+        nb: Arc<Mutex<BGPNeighbor>>,
+    ) {
         match m.body {
             bgp::BGPMessageBody::Keepalive(_body) => {
                 BGPNeighbor::handle_keepalive(nb.clone()).await;
                 {
                     let mut n = nb.lock().await;
-                    n.attributes.state = BGPState::Established
+                    n.attributes.state = BGPState::Established;
+                    BGPNeighbor::send_locrib(s.clone(), n.clone()).await;
                 }
                 println!("FSM: OpenConfirm to Established");
             }
@@ -863,6 +868,13 @@ impl BGPNeighbor {
         n.attributes.keepalive_timer = 0;
     }
 
+    pub async fn is_established(&self) -> bool {
+        match self.attributes.state {
+            BGPState::Established => true,
+            _ => false,
+        }
+    }
+
     async fn adjrib_add(&mut self, af: AddressFamily, routes: RibUpdate) {
         println!("Adding routes to ajdrib {:?} : {:?}", af, routes);
         match self.adjrib.get_mut(&af) {
@@ -897,6 +909,25 @@ impl BGPNeighbor {
                 for nlri in routes.nlris {
                     rib.remove(&nlri);
                 }
+            }
+        }
+    }
+
+    async fn send_locrib(s: Arc<Mutex<speaker::BGPSpeaker>>, nb: BGPNeighbor) {
+        let adv = nb.capabilities_advertised.multiprotocol.unwrap().clone();
+        let rec = nb.capabilities_received.multiprotocol.unwrap().clone();
+
+        for af in adv {
+            if rec.contains(&af) {
+                println!("*** Sending {:?}\n", &af);
+                let s = s.lock().await;
+                let r = s.rib.get(&af).unwrap().lock().await;
+                let routes: Vec<(NLRI, Option<RouteAttributes>)> = r
+                    .iter()
+                    .map(|(n, a)| (n.clone(), Some(a.first().unwrap().clone())))
+                    .collect();
+                let tx = nb.tx.clone();
+                tx.unwrap().send(Event::RibUpdate(routes)).await.unwrap();
             }
         }
     }
