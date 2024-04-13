@@ -573,6 +573,7 @@ impl Into<Vec<u8>> for BGPUpdateMessage {
 }
 impl From<Vec<u8>> for BGPUpdateMessage {
     fn from(src: Vec<u8>) -> Self {
+        println!("\n===src = {:?}===\n", src);
         let mut wdl = [0u8; 2];
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
@@ -603,11 +604,25 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         let mut pa: Vec<PathAttribute> = vec![];
         let mut used = 0;
         while atl > used {
-            let atn = src[i + 2] as usize;
-            let n: PathAttribute = src[i..i + 3 + atn].to_vec().into();
+            let atn: usize;
+            let n: PathAttribute;
+            match is_extended_len(src[i]) {
+                false => {
+                    atn = src[i + 2] as usize;
+                    n = src[i..i + 3 + atn].to_vec().into();
+                    used += 3 + atn;
+                    i += 3 + atn;
+                }
+                true => {
+                    let mut l = [0u8; 2];
+                    l.copy_from_slice(&src[i + 2..i + 4]);
+                    atn = u16::from_be_bytes(l) as usize;
+                    n = src[i..i + 4 + atn].to_vec().into();
+                    used += 4 + atn;
+                    i += 4 + atn;
+                }
+            }
             pa.push(n);
-            used += 3 + atn;
-            i += 3 + atn;
         }
 
         let total_len = src.len();
@@ -633,6 +648,15 @@ impl From<Vec<u8>> for BGPUpdateMessage {
             .unwrap()
     }
 }
+
+fn is_extended_len(mask: u8) -> bool {
+    let mask = mask >> 4;
+    match mask & 0b0001 {
+        0 => false,
+        _ => true,
+    }
+}
+
 #[derive(Builder, Debug, PartialEq, Clone)]
 #[builder(setter(into))]
 pub struct PathAttribute {
@@ -732,6 +756,7 @@ impl PathAttribute {
 
 impl From<Vec<u8>> for PathAttribute {
     fn from(src: Vec<u8>) -> Self {
+        println!("\n***pa src = {:?}***\n", src);
         let mask = src[0];
 
         let mask = mask >> 4;
@@ -762,9 +787,21 @@ impl From<Vec<u8>> for PathAttribute {
                 PathAttributeValue::Origin(FromPrimitive::from_u8(src[3]).unwrap())
             }
             PathAttributeType::AsPath => {
-                let mut total_len = src[2] as usize;
+                let mut total_len;
+                let i;
+                match extended_length {
+                    false => {
+                        total_len = src[2] as usize;
+                        i = 3
+                    }
+                    true => {
+                        let mut l = [0u8; 2];
+                        l.copy_from_slice(&src[2..4]);
+                        total_len = u16::from_be_bytes(l) as usize;
+                        i = 4;
+                    }
+                }
                 let mut asp: ASPATH = vec![];
-                let i = 3;
                 let mut offset = 0;
 
                 while total_len > 0 {
@@ -863,8 +900,8 @@ impl Into<Vec<u8>> for PathAttribute {
             mask += 8;
         }
 
-        buf.push(mask);
-        buf.push(0x0);
+        buf.push(mask << 4);
+        // buf.push(0x0);
         let code: u8;
         let mut val = Cursor::new(vec![]);
 
@@ -1508,6 +1545,70 @@ impl Message {
 mod tests {
 
     use super::*;
+    use pretty_assertions::{assert_eq, assert_ne};
+
+    #[test]
+    fn test_update_to_u8() {
+        let v: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x14, 0x40, 0x01, 0x01, 0x00, 0x40, 0x02, 0x06, 0x02, 0x02, 0xfe,
+            0xb0, 0xfe, 0x4c, 0x40, 0x03, 0x04, 0x02, 0x02, 0x02, 0x02, 0x18, 0x0a, 0x0a, 0x01,
+            0x18, 0x0a, 0x0a, 0x02, 0x18, 0x0a, 0x0a, 0x03,
+        ];
+        let wdr = vec![];
+        let pa: Vec<PathAttribute> = [
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::Origin,
+                value: PathAttributeValue::Origin(OriginType::IGP),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::AsPath,
+                value: PathAttributeValue::AsPath(
+                    [ASPATHSegment {
+                        path_type: ASPATHSegmentType::AsSequence,
+                        as_list: [65200, 65100].to_vec(),
+                    }]
+                    .to_vec(),
+                ),
+            },
+            PathAttribute {
+                optional: false,
+                transitive: true,
+                partial: false,
+                extended_length: false,
+                type_code: PathAttributeType::NextHop,
+                value: PathAttributeValue::NextHop("2.2.2.2".parse().unwrap()),
+            },
+        ]
+        .to_vec();
+        let nlri: Vec<NLRI> = [
+            NLRI {
+                net: "10.10.1.0/24".parse().unwrap(),
+            },
+            NLRI {
+                net: "10.10.2.0/24".parse().unwrap(),
+            },
+            NLRI {
+                net: "10.10.3.0/24".parse().unwrap(),
+            },
+        ]
+        .to_vec();
+        let w: Vec<u8> = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(wdr)
+            .path_attributes(pa)
+            .nlri(nlri)
+            .build()
+            .unwrap()
+            .into();
+        assert_eq!(v, w);
+    }
 
     #[test]
     fn test_u8_to_update() {

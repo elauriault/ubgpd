@@ -1,5 +1,5 @@
 use async_std::sync::{Arc, Mutex};
-use futures::stream::Next;
+// use futures::stream::Next;
 // use netlink_packet_route::AddressFamily;
 // use ipnet::IpAdd;
 use std::cmp::Ordering;
@@ -37,7 +37,7 @@ impl RouteAttributes {
     pub fn prepend(&mut self, asn: u16, times: u8) -> bgp::ASPATH {
         let sequence = bgp::ASPATHSegment {
             path_type: bgp::ASPATHSegmentType::AsSequence,
-            as_list: [asn, times.into()].to_vec(),
+            as_list: vec![asn; times.into()],
         };
         self.as_path.insert(0, sequence);
         self.as_path.clone()
