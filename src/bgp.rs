@@ -573,7 +573,6 @@ impl Into<Vec<u8>> for BGPUpdateMessage {
 }
 impl From<Vec<u8>> for BGPUpdateMessage {
     fn from(src: Vec<u8>) -> Self {
-        println!("\n===src = {:?}===\n", src);
         let mut wdl = [0u8; 2];
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
@@ -756,7 +755,6 @@ impl PathAttribute {
 
 impl From<Vec<u8>> for PathAttribute {
     fn from(src: Vec<u8>) -> Self {
-        println!("\n***pa src = {:?}***\n", src);
         let mask = src[0];
 
         let mask = mask >> 4;

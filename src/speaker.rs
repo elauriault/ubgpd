@@ -351,11 +351,13 @@ impl BGPSpeaker {
                         let _ = tx.send(FibEvent::RibUpdated).await;
                         for n in &neighbors {
                             let n = n.lock().await;
-                            let tx = n.tx.clone();
-                            tx.unwrap()
-                                .send(neighbor::Event::RibUpdate(modified.clone()))
-                                .await
-                                .unwrap();
+                            if n.is_established().await {
+                                let tx = n.tx.clone();
+                                tx.unwrap()
+                                    .send(neighbor::Event::RibUpdate(modified.clone()))
+                                    .await
+                                    .unwrap();
+                            }
                         }
                     }
                 }
