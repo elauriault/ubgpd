@@ -751,6 +751,9 @@ impl PathAttribute {
             extended_length: false,
         }
     }
+    pub fn is_transitive(&self) -> bool {
+        self.transitive
+    }
 }
 
 impl From<Vec<u8>> for PathAttribute {

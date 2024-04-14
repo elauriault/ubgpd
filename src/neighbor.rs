@@ -1143,8 +1143,10 @@ impl BGPNeighbor {
                         }
                     }
                 }
-                ra.prepare_to_send().await;
-                let pa: Vec<bgp::PathAttribute> = ra.into();
+                let pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
+                    .into_iter()
+                    .filter(|x| x.is_transitive())
+                    .collect::<Vec<bgp::PathAttribute>>();
                 let body = bgp::BGPUpdateMessageBuilder::default()
                     .withdrawn_routes(wd.clone())
                     .path_attributes(pa)
