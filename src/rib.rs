@@ -64,11 +64,6 @@ impl RouteAttributes {
         true
     }
 
-    pub async fn prepare_to_send(&mut self) {
-        self.multi_exit_disc = None;
-        self.local_pref = None;
-    }
-
     pub async fn new(
         src: Vec<bgp::PathAttribute>,
         local_asn: u32,
