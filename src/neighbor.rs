@@ -919,7 +919,6 @@ impl BGPNeighbor {
 
         for af in adv {
             if rec.contains(&af) {
-                println!("*** Sending {:?}\n", &af);
                 let s = s.lock().await;
                 let r = s.rib.get(&af).unwrap().lock().await;
                 let routes: Vec<(NLRI, Option<RouteAttributes>)> = r
@@ -1144,6 +1143,7 @@ impl BGPNeighbor {
                         }
                     }
                 }
+                ra.prepare_to_send().await;
                 let pa: Vec<bgp::PathAttribute> = ra.into();
                 let body = bgp::BGPUpdateMessageBuilder::default()
                     .withdrawn_routes(wd.clone())
