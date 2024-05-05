@@ -57,6 +57,7 @@ pub struct BGPSessionAttributes {
     // track_tcp_state: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Event {
     ManualStart,
