@@ -15,7 +15,7 @@ use crate::neighbor;
 
 #[derive(Debug, Eq, Clone, Hash)]
 pub struct RouteAttributes {
-    as_path: bgp::ASPATH,
+    as_path: bgp::Aspath,
     origin: bgp::OriginType,
     pub next_hop: IpAddr,
     local_pref: Option<u32>,
@@ -29,12 +29,12 @@ pub struct RouteAttributes {
 
 #[derive(Debug, Clone)]
 pub struct RibUpdate {
-    pub nlris: Vec<bgp::NLRI>,
+    pub nlris: Vec<bgp::Nlri>,
     pub attributes: RouteAttributes,
 }
 
 impl RouteAttributes {
-    pub fn prepend(&mut self, asn: u16, times: u8) -> bgp::ASPATH {
+    pub fn prepend(&mut self, asn: u16, times: u8) -> bgp::Aspath {
         let sequence = bgp::ASPATHSegment {
             path_type: bgp::ASPATHSegmentType::AsSequence,
             as_list: vec![asn; times.into()],
@@ -43,14 +43,14 @@ impl RouteAttributes {
         self.as_path.clone()
     }
 
-    pub fn from_ibgp(&self) -> bool {
+    pub fn is_from_ibgp(&self) -> bool {
         if self.peer_type == PeeringType::Ibgp {
             return true;
         }
         false
     }
 
-    pub fn from_neighbor(&self, n: u32) -> bool {
+    pub fn is_from_neighbor(&self, n: u32) -> bool {
         if self.peer_rid == n {
             return true;
         }
@@ -75,7 +75,7 @@ impl RouteAttributes {
         let mut local_pref = None;
         let mut next_hop = None;
         let mut as_path: Vec<bgp::ASPATHSegment> = vec![];
-        let mut origin = bgp::OriginType::IGP;
+        let mut origin = bgp::OriginType::Igp;
         for p in src {
             match p.value {
                 bgp::PathAttributeValue::Origin(o) => {
@@ -98,10 +98,11 @@ impl RouteAttributes {
                 _ => {}
             }
         }
-        match nh {
-            Some(n) => next_hop = Some(n),
-            None => {}
-        }
+
+        if let Some(n) = nh {
+            next_hop = Some(n)
+        };
+
         let next_hop = next_hop.unwrap();
         let remote_asn;
         let peer_rid;
@@ -139,11 +140,11 @@ impl RouteAttributes {
     }
 }
 
-impl Into<Vec<PathAttribute>> for RouteAttributes {
-    fn into(self) -> Vec<PathAttribute> {
+impl From<RouteAttributes> for Vec<PathAttribute> {
+    fn from(val: RouteAttributes) -> Self {
         let mut ret = vec![];
         // let mut mpnh = None;
-        match self.next_hop {
+        match val.next_hop {
             IpAddr::V6(_ip6) => {
                 // mpnh = Some(ip6);
             }
@@ -151,19 +152,13 @@ impl Into<Vec<PathAttribute>> for RouteAttributes {
                 ret.push(PathAttribute::nexthop(ip4));
             }
         }
-        ret.push(PathAttribute::origin(self.origin));
-        ret.push(PathAttribute::aspath(self.as_path));
-        match self.local_pref {
-            Some(pref) => {
-                ret.push(PathAttribute::local_pref(pref));
-            }
-            None => {}
+        ret.push(PathAttribute::origin(val.origin));
+        ret.push(PathAttribute::aspath(val.as_path));
+        if let Some(pref) = val.local_pref {
+            ret.push(PathAttribute::local_pref(pref));
         }
-        match self.multi_exit_disc {
-            Some(med) => {
-                ret.push(PathAttribute::med(med));
-            }
-            None => {}
+        if let Some(med) = val.multi_exit_disc {
+            ret.push(PathAttribute::med(med));
         }
         ret
     }
@@ -303,4 +298,4 @@ impl Ord for RouteAttributes {
     }
 }
 
-pub type Rib = HashMap<bgp::NLRI, Vec<RouteAttributes>>;
+pub type Rib = HashMap<bgp::Nlri, Vec<RouteAttributes>>;

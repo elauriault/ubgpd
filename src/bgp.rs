@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+// #![allow(dead_code)]
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::{Buf, BytesMut};
 use ipnet::IpNet;
@@ -27,6 +27,7 @@ const MARKER: [u8; 16] = [0xff; 16];
 const VERSION: u8 = 4;
 const MAX: usize = 4096;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct MissingMarker;
 
@@ -38,6 +39,7 @@ impl fmt::Display for MissingMarker {
 
 impl Error for MissingMarker {}
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum BGPError {
     #[error("Builder could not complete")]
@@ -61,38 +63,39 @@ pub enum BGPError {
 
 #[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u16)]
-pub enum AFI {
+pub enum Afi {
     Ipv4 = 1,
     Ipv6,
 }
 
 #[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u8)]
-pub enum SAFI {
+pub enum Safi {
     NLRIUnicast = 1,
     NLRIMulticast,
 }
 
 #[derive(Deserialize, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AddressFamily {
-    pub afi: AFI,
-    pub safi: SAFI,
+    pub afi: Afi,
+    pub safi: Safi,
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq, Default)]
 #[repr(u8)]
 pub enum MessageType {
-    OPEN = 1,
-    UPDATE,
-    NOTIFICATION,
-    KEEPALIVE,
+    Open = 1,
+    #[default]
+    Update,
+    Notification,
+    Keepalive,
 }
 
-impl Default for MessageType {
-    fn default() -> Self {
-        MessageType::UPDATE
-    }
-}
+// impl Default for MessageType {
+//     fn default() -> Self {
+//         MessageType::UPDATE
+//     }
+// }
 
 #[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
@@ -105,6 +108,7 @@ pub enum ErrorCode {
     Cease,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 #[repr(u8)]
 enum HeaderSubCode {
@@ -113,6 +117,7 @@ enum HeaderSubCode {
     BadMessageType = 3,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 #[repr(u8)]
 enum OpenSubCode {
@@ -124,6 +129,7 @@ enum OpenSubCode {
     UnacceptableHoldTime = 6,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 #[repr(u8)]
 enum UpdateSubCode {
@@ -171,17 +177,15 @@ impl fmt::Display for BGPOpenMessage {
     }
 }
 
-impl Into<Vec<u8>> for BGPOpenMessage {
-    fn into(self) -> Vec<u8> {
+impl From<BGPOpenMessage> for Vec<u8> {
+    fn from(val: BGPOpenMessage) -> Self {
         let mut buf = Cursor::new(vec![]);
-        // let len = self.opt_params.len;
-        let opt_params: Vec<u8> = self.opt_params.into();
-        buf.write(&vec![self.version.clone()]).unwrap();
-        buf.write_u16::<BigEndian>(self.asn).unwrap();
-        buf.write_u16::<BigEndian>(self.hold_time).unwrap();
-        buf.write_u32::<BigEndian>(self.router_id).unwrap();
-        // buf.write(&vec![len as u8]).unwrap();
-        buf.write(&opt_params).unwrap();
+        let opt_params: Vec<u8> = val.opt_params.into();
+        buf.write_u8(val.version).unwrap();
+        buf.write_u16::<BigEndian>(val.asn).unwrap();
+        buf.write_u16::<BigEndian>(val.hold_time).unwrap();
+        buf.write_u32::<BigEndian>(val.router_id).unwrap();
+        buf.write_all(&opt_params).unwrap();
         buf.into_inner()
     }
 }
@@ -286,8 +290,8 @@ pub struct BGPOptionalParameter {
 impl Default for BGPOptionalParameter {
     fn default() -> Self {
         let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
-            afi: AFI::Ipv4,
-            safi: SAFI::NLRIUnicast,
+            afi: Afi::Ipv4,
+            safi: Safi::NLRIUnicast,
         };
         let cv: Vec<u8> = cv.into();
         let pc: BGPCapability = BGPCapability {
@@ -322,12 +326,12 @@ impl From<Vec<u8>> for BGPOptionalParameter {
     }
 }
 
-impl Into<Vec<u8>> for BGPOptionalParameter {
-    fn into(self) -> Vec<u8> {
+impl From<BGPOptionalParameter> for Vec<u8> {
+    fn from(val: BGPOptionalParameter) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write(&vec![self.param_type.clone() as u8]).unwrap();
-        buf.write(&vec![self.param_value.len() as u8]).unwrap();
-        buf.write(&self.param_value).unwrap();
+        buf.write_all(&[val.param_type.clone() as u8]).unwrap();
+        buf.write_all(&[val.param_value.len() as u8]).unwrap();
+        buf.write_all(&val.param_value).unwrap();
         buf.into_inner()
     }
 }
@@ -343,7 +347,7 @@ impl BGPOptionalParameters {
         let mut len = 0;
         for p in params.clone() {
             len += 2;
-            len += p.param_length as usize;
+            len += p.param_length;
         }
         BGPOptionalParameters { len, params }
     }
@@ -359,13 +363,13 @@ impl Default for BGPOptionalParameters {
     }
 }
 
-impl Into<Vec<u8>> for BGPOptionalParameters {
-    fn into(self) -> Vec<u8> {
+impl From<BGPOptionalParameters> for Vec<u8> {
+    fn from(val: BGPOptionalParameters) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write(&vec![self.len.clone() as u8]).unwrap();
-        for p in self.params {
+        buf.write_u8(val.len as u8).unwrap();
+        for p in val.params {
             let p: Vec<u8> = p.into();
-            buf.write(&p).unwrap();
+            buf.write_all(&p).unwrap();
         }
         buf.into_inner()
     }
@@ -424,14 +428,12 @@ impl From<Vec<u8>> for BGPCapability {
     }
 }
 
-impl Into<Vec<u8>> for BGPCapability {
-    fn into(self) -> Vec<u8> {
+impl From<BGPCapability> for Vec<u8> {
+    fn from(val: BGPCapability) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write(&vec![self.capability_code.clone() as u8])
-            .unwrap();
-        // buf.write(&vec![self.capability_value.len() as u8]).unwrap();
-        buf.write(&vec![self.capability_length as u8]).unwrap();
-        buf.write(&self.capability_value).unwrap();
+        buf.write_u8(val.capability_code as u8).unwrap();
+        buf.write_u8(val.capability_length as u8).unwrap();
+        buf.write_all(&val.capability_value).unwrap();
         buf.into_inner()
     }
 }
@@ -449,23 +451,23 @@ pub enum BGPCapabilityCode {
 
 #[derive(Debug)]
 pub struct BGPCapabilityMultiprotocol {
-    afi: AFI,
-    safi: SAFI,
+    afi: Afi,
+    safi: Safi,
 }
 
-impl Into<Vec<u8>> for BGPCapabilityMultiprotocol {
-    fn into(self) -> Vec<u8> {
+impl From<BGPCapabilityMultiprotocol> for Vec<u8> {
+    fn from(val: BGPCapabilityMultiprotocol) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write_u16::<BigEndian>(self.afi as u16).unwrap();
+        buf.write_u16::<BigEndian>(val.afi as u16).unwrap();
         buf.write_u8(0).unwrap();
-        buf.write(&vec![self.safi as u8]).unwrap();
+        buf.write_u8(val.safi as u8).unwrap();
         buf.into_inner()
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BGPCapabilities {
-    len: usize,
+    // len: usize,
     pub params: Vec<BGPCapability>,
 }
 
@@ -513,7 +515,7 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                     i += 2 + l as usize;
                 }
                 BGPCapabilities {
-                    len: v.param_length,
+                    // len: v.param_length,
                     params: caps,
                 }
             }
@@ -524,9 +526,9 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
 #[derive(Default, Builder, Debug, Clone, PartialEq)]
 #[builder(setter(into))]
 pub struct BGPUpdateMessage {
-    pub withdrawn_routes: Vec<NLRI>,
+    pub withdrawn_routes: Vec<Nlri>,
     pub path_attributes: Vec<PathAttribute>,
-    pub nlri: Vec<NLRI>,
+    pub nlri: Vec<Nlri>,
 }
 
 impl BGPUpdateMessage {
@@ -542,32 +544,32 @@ impl BGPUpdateMessage {
     }
 }
 
-impl Into<Vec<u8>> for BGPUpdateMessage {
-    fn into(self) -> Vec<u8> {
+impl From<BGPUpdateMessage> for Vec<u8> {
+    fn from(val: BGPUpdateMessage) -> Self {
         let mut buf = Cursor::new(vec![]);
 
         let mut wd: Vec<u8> = vec![];
-        for w in self.withdrawn_routes {
+        for w in val.withdrawn_routes {
             let mut v: Vec<u8> = w.into();
             wd.append(&mut v);
         }
         buf.write_u16::<BigEndian>(wd.len() as u16).unwrap();
-        buf.write(&wd).unwrap();
+        buf.write_all(&wd).unwrap();
 
         let mut pa: Vec<u8> = vec![];
-        for a in self.path_attributes {
+        for a in val.path_attributes {
             let mut v: Vec<u8> = a.into();
             pa.append(&mut v);
         }
         buf.write_u16::<BigEndian>(pa.len() as u16).unwrap();
-        buf.write(&pa).unwrap();
+        buf.write_all(&pa).unwrap();
 
         let mut nl: Vec<u8> = vec![];
-        for w in self.nlri {
+        for w in val.nlri {
             let mut v: Vec<u8> = w.into();
             nl.append(&mut v);
         }
-        buf.write(&nl).unwrap();
+        buf.write_all(&nl).unwrap();
         buf.into_inner()
     }
 }
@@ -577,7 +579,7 @@ impl From<Vec<u8>> for BGPUpdateMessage {
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
 
-        let mut wd: Vec<NLRI> = vec![];
+        let mut wd: Vec<Nlri> = vec![];
         let mut used = 0;
         let mut i = 2;
 
@@ -587,8 +589,8 @@ impl From<Vec<u8>> for BGPUpdateMessage {
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: NLRI = buf.into();
-            wd.push(n.clone());
+            let n: Nlri = buf.into();
+            wd.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             used += blen;
             i += blen;
@@ -626,15 +628,15 @@ impl From<Vec<u8>> for BGPUpdateMessage {
 
         let total_len = src.len();
 
-        let mut routes: Vec<NLRI> = vec![];
+        let mut routes: Vec<Nlri> = vec![];
         while i < total_len {
             let plen = src[i];
             let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: NLRI = buf.into();
-            routes.push(n.clone());
+            let n: Nlri = buf.into();
+            routes.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             i += blen;
         }
@@ -650,10 +652,7 @@ impl From<Vec<u8>> for BGPUpdateMessage {
 
 fn is_extended_len(mask: u8) -> bool {
     let mask = mask >> 4;
-    match mask & 0b0001 {
-        0 => false,
-        _ => true,
-    }
+    !matches!(mask & 0b0001, 0)
 }
 
 #[derive(Builder, Debug, PartialEq, Clone)]
@@ -678,7 +677,7 @@ impl PathAttribute {
             extended_length: false,
         }
     }
-    pub fn aspath(aspath: ASPATH) -> Self {
+    pub fn aspath(aspath: Aspath) -> Self {
         PathAttribute {
             type_code: PathAttributeType::AsPath,
             value: PathAttributeValue::AsPath(aspath),
@@ -731,20 +730,20 @@ impl PathAttribute {
             extended_length: false,
         }
     }
-    pub fn mp_reachable(af: AddressFamily, nh: IpAddr, nlris: Vec<NLRI>) -> Self {
+    pub fn mp_reachable(af: AddressFamily, nh: IpAddr, nlris: Vec<Nlri>) -> Self {
         PathAttribute {
             type_code: PathAttributeType::MPReachableNLRI,
-            value: PathAttributeValue::MPReachableNLRI(MPNLRI { af, nh, nlris }),
+            value: PathAttributeValue::MPReachableNLRI(Mpnlri { af, nh, nlris }),
             optional: true,
             transitive: false,
             partial: false,
             extended_length: false,
         }
     }
-    pub fn mp_unreachable(af: AddressFamily, nh: IpAddr, nlris: Vec<NLRI>) -> Self {
+    pub fn mp_unreachable(af: AddressFamily, nh: IpAddr, nlris: Vec<Nlri>) -> Self {
         PathAttribute {
             type_code: PathAttributeType::MPUnreachableNLRI,
-            value: PathAttributeValue::MPUnreachableNLRI(MPNLRI { af, nh, nlris }),
+            value: PathAttributeValue::MPUnreachableNLRI(Mpnlri { af, nh, nlris }),
             optional: true,
             transitive: false,
             partial: false,
@@ -761,25 +760,13 @@ impl From<Vec<u8>> for PathAttribute {
         let mask = src[0];
 
         let mask = mask >> 4;
-        let extended_length: bool = match mask & 0b0001 {
-            0 => false,
-            _ => true,
-        };
+        let extended_length: bool = !matches!(mask & 0b0001, 0);
 
-        let partial: bool = match mask & 0b0010 {
-            0 => false,
-            _ => true,
-        };
+        let partial: bool = !matches!(mask & 0b0010, 0);
 
-        let transitive: bool = match mask & 0b0100 {
-            0 => false,
-            _ => true,
-        };
+        let transitive: bool = !matches!(mask & 0b0100, 0);
 
-        let optional: bool = match mask & 0b1000 {
-            0 => false,
-            _ => true,
-        };
+        let optional: bool = !matches!(mask & 0b1000, 0);
 
         let type_code: PathAttributeType = FromPrimitive::from_u8(src[1]).unwrap();
 
@@ -802,7 +789,7 @@ impl From<Vec<u8>> for PathAttribute {
                         i = 4;
                     }
                 }
-                let mut asp: ASPATH = vec![];
+                let mut asp: Aspath = vec![];
                 let mut offset = 0;
 
                 while total_len > 0 {
@@ -859,7 +846,7 @@ impl From<Vec<u8>> for PathAttribute {
             PathAttributeType::Community => PathAttributeValue::Community,
             PathAttributeType::OriginatorId => PathAttributeValue::OriginatorId,
             PathAttributeType::ClusterList => PathAttributeValue::ClusterList,
-            PathAttributeType::DPA => PathAttributeValue::DPA,
+            PathAttributeType::Dpa => PathAttributeValue::Dpa,
             PathAttributeType::Advertiser => PathAttributeValue::Advertiser,
             PathAttributeType::RcidPathClusterId => PathAttributeValue::RcidPathClusterId,
             PathAttributeType::MPReachableNLRI => {
@@ -882,61 +869,63 @@ impl From<Vec<u8>> for PathAttribute {
     }
 }
 
-impl Into<Vec<u8>> for PathAttribute {
-    fn into(self) -> Vec<u8> {
+impl From<PathAttribute> for Vec<u8> {
+    fn from(val: PathAttribute) -> Self {
         let mut buf: Vec<u8> = vec![];
 
         let mut mask: u8 = 0;
 
-        if self.extended_length {
+        if val.extended_length {
             mask += 1;
         }
-        if self.partial {
+        if val.partial {
             mask += 2;
         }
-        if self.transitive {
+        if val.transitive {
             mask += 4;
         }
-        if self.optional {
+        if val.optional {
             mask += 8;
         }
 
         buf.push(mask << 4);
         // buf.push(0x0);
         let code: u8;
-        let mut val = Cursor::new(vec![]);
+        let mut bufval = Cursor::new(vec![]);
 
-        match self.value {
+        match val.value {
             PathAttributeValue::Origin(value) => {
                 code = 1;
-                val.write_u8(value as u8).unwrap();
+                bufval.write_u8(value as u8).unwrap();
             }
             PathAttributeValue::AsPath(value) => {
                 code = 2;
                 for i in value {
                     let v: Vec<u8> = i.into();
-                    val.write(&v).unwrap();
+                    bufval.write_all(&v).unwrap();
                 }
             }
             PathAttributeValue::NextHop(value) => {
                 code = 3;
-                val.write_u32::<BigEndian>(value.into()).unwrap();
+                bufval.write_u32::<BigEndian>(value.into()).unwrap();
             }
             PathAttributeValue::MultiExitDisc(value) => {
                 code = 4;
-                val.write_u32::<BigEndian>(value).unwrap();
+                bufval.write_u32::<BigEndian>(value).unwrap();
             }
             PathAttributeValue::LocalPref(value) => {
                 code = 5;
-                val.write_u32::<BigEndian>(value).unwrap();
+                bufval.write_u32::<BigEndian>(value).unwrap();
             }
             PathAttributeValue::AtomicAggregate => {
                 code = 6;
             }
             PathAttributeValue::Aggregator(value) => {
                 code = 7;
-                val.write_u16::<BigEndian>(value.last_as).unwrap();
-                val.write_u32::<BigEndian>(value.aggregator.into()).unwrap();
+                bufval.write_u16::<BigEndian>(value.last_as).unwrap();
+                bufval
+                    .write_u32::<BigEndian>(value.aggregator.into())
+                    .unwrap();
             }
             PathAttributeValue::Community => {
                 code = 8;
@@ -947,7 +936,7 @@ impl Into<Vec<u8>> for PathAttribute {
             PathAttributeValue::ClusterList => {
                 code = 10;
             }
-            PathAttributeValue::DPA => {
+            PathAttributeValue::Dpa => {
                 code = 11;
             }
             PathAttributeValue::Advertiser => {
@@ -959,19 +948,19 @@ impl Into<Vec<u8>> for PathAttribute {
             PathAttributeValue::MPReachableNLRI(value) => {
                 code = 14;
                 let v: Vec<u8> = value.into();
-                val.write(&v).unwrap();
+                bufval.write_all(&v).unwrap();
             }
             PathAttributeValue::MPUnreachableNLRI(value) => {
                 code = 15;
                 let v: Vec<u8> = value.into();
-                val.write(&v).unwrap();
+                bufval.write_all(&v).unwrap();
             }
             PathAttributeValue::ExtCommunities => {
                 code = 16;
             }
         }
         buf.push(code);
-        let mut val = val.into_inner();
+        let mut val = bufval.into_inner();
         let len = val.len() as u8;
         buf.push(len);
         buf.append(&mut val);
@@ -991,7 +980,7 @@ pub enum PathAttributeType {
     Community,
     OriginatorId,
     ClusterList,
-    DPA,
+    Dpa,
     Advertiser,
     RcidPathClusterId,
     MPReachableNLRI,
@@ -1002,7 +991,7 @@ pub enum PathAttributeType {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PathAttributeValue {
     Origin(OriginType),
-    AsPath(ASPATH),
+    AsPath(Aspath),
     NextHop(Ipv4Addr),
     MultiExitDisc(u32),
     LocalPref(u32),
@@ -1011,32 +1000,32 @@ pub enum PathAttributeValue {
     Community,
     OriginatorId,
     ClusterList,
-    DPA,
+    Dpa,
     Advertiser,
     RcidPathClusterId,
-    MPReachableNLRI(MPNLRI),
-    MPUnreachableNLRI(MPNLRI),
+    MPReachableNLRI(Mpnlri),
+    MPUnreachableNLRI(Mpnlri),
     ExtCommunities,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, FromPrimitive, PartialOrd, Ord, Hash)]
 pub enum OriginType {
-    IGP = 0,
-    EGP,
-    INCOMPLETE,
+    Igp = 0,
+    Egp,
+    Incomplete,
 }
 
-#[derive(Debug, Eq, Clone, FromPrimitive, Hash)]
+#[derive(Debug, Eq, Clone, FromPrimitive, PartialEq, Hash)]
 pub enum ASPATHSegmentType {
     AsSet = 1,
     AsSequence,
 }
 
-impl PartialEq for ASPATHSegmentType {
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
+// impl PartialEq for ASPATHSegmentType {
+//     fn eq(&self, _other: &Self) -> bool {
+//         true
+//     }
+// }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ASPATHSegment {
@@ -1044,13 +1033,13 @@ pub struct ASPATHSegment {
     pub as_list: Vec<u16>,
 }
 
-impl Into<Vec<u8>> for ASPATHSegment {
-    fn into(self) -> Vec<u8> {
+impl From<ASPATHSegment> for Vec<u8> {
+    fn from(val: ASPATHSegment) -> Self {
         let mut v: Vec<u8> = vec![];
-        v.push(self.path_type as u8);
-        v.push(self.as_list.len() as u8);
+        v.push(val.path_type as u8);
+        v.push(val.as_list.len() as u8);
         let mut buf = Cursor::new(vec![]);
-        for asn in self.as_list {
+        for asn in val.as_list {
             buf.write_u16::<BigEndian>(asn).unwrap();
         }
         let mut buf = buf.into_inner();
@@ -1068,13 +1057,13 @@ impl ASPATHSegment {
     }
 }
 
-pub type ASPATH = Vec<ASPATHSegment>;
+pub type Aspath = Vec<ASPATHSegment>;
 
 pub trait Flatten {
     fn flatten_aspath(&self) -> Vec<u16>;
 }
 
-impl Flatten for ASPATH {
+impl Flatten for Aspath {
     fn flatten_aspath(&self) -> Vec<u16> {
         let mut v: Vec<u16> = vec![];
         for segment in self {
@@ -1092,7 +1081,7 @@ pub struct AggregatorValue {
 
 #[derive(Builder, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 #[builder(setter(into))]
-pub struct NLRI {
+pub struct Nlri {
     net: IpNet,
 }
 
@@ -1104,50 +1093,50 @@ pub struct Ipv6Octets {
     octets: Vec<u8>,
 }
 
-impl Into<Vec<u8>> for NLRI {
-    fn into(self) -> Vec<u8> {
+impl From<Nlri> for Vec<u8> {
+    fn from(val: Nlri) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write_u8(self.net.prefix_len()).unwrap();
-        let blen = (self.net.prefix_len() as f32 / 8.0).ceil() as usize;
-        match self.net {
+        buf.write_u8(val.net.prefix_len()).unwrap();
+        let blen = (val.net.prefix_len() as f32 / 8.0).ceil() as usize;
+        match val.net {
             IpNet::V4(v) => {
                 let addrv4: u32 = v.network().into();
                 let addr = addrv4.to_be_bytes();
-                buf.write(&addr[0..blen]).unwrap();
+                buf.write_all(&addr[0..blen]).unwrap();
             }
             IpNet::V6(v) => {
                 let addrv6: u128 = v.network().into();
                 let addr = addrv6.to_be_bytes();
-                buf.write(&addr[0..blen]).unwrap();
+                buf.write_all(&addr[0..blen]).unwrap();
             }
         }
         buf.into_inner()
     }
 }
 
-impl Into<IpNet> for NLRI {
-    fn into(self) -> IpNet {
-        self.net.into()
+impl From<Nlri> for IpNet {
+    fn from(val: Nlri) -> Self {
+        val.net
     }
 }
 
-impl Into<IpNet> for &NLRI {
-    fn into(self) -> IpNet {
-        self.net.into()
+impl From<&Nlri> for IpNet {
+    fn from(val: &Nlri) -> Self {
+        val.net
     }
 }
 
-impl From<Ipv4Octets> for NLRI {
+impl From<Ipv4Octets> for Nlri {
     fn from(src: Ipv4Octets) -> Self {
         let mut addr = src.octets;
         let plen = addr.remove(0);
         addr.resize(4, 0);
         let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen).unwrap();
-        NLRIBuilder::default().net(net).build().unwrap()
+        NlriBuilder::default().net(net).build().unwrap()
     }
 }
 
-impl From<Ipv6Octets> for NLRI {
+impl From<Ipv6Octets> for Nlri {
     fn from(src: Ipv6Octets) -> Self {
         let mut addr = src.octets;
         let plen = addr.remove(0);
@@ -1169,23 +1158,23 @@ impl From<Ipv6Octets> for NLRI {
             plen,
         )
         .unwrap();
-        NLRIBuilder::default().net(net).build().unwrap()
+        NlriBuilder::default().net(net).build().unwrap()
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MPNLRI {
+pub struct Mpnlri {
     pub af: AddressFamily,
     pub nh: IpAddr,
-    pub nlris: Vec<NLRI>,
+    pub nlris: Vec<Nlri>,
 }
 
-impl Default for MPNLRI {
+impl Default for Mpnlri {
     fn default() -> Self {
-        MPNLRI {
+        Mpnlri {
             af: AddressFamily {
-                afi: AFI::Ipv6,
-                safi: SAFI::NLRIUnicast,
+                afi: Afi::Ipv6,
+                safi: Safi::NLRIUnicast,
             },
             nh: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
             nlris: vec![],
@@ -1193,7 +1182,7 @@ impl Default for MPNLRI {
     }
 }
 
-impl From<Vec<u8>> for MPNLRI {
+impl From<Vec<u8>> for Mpnlri {
     fn from(src: Vec<u8>) -> Self {
         let mut src = src;
         let total_len = src.remove(0) as usize;
@@ -1201,12 +1190,12 @@ impl From<Vec<u8>> for MPNLRI {
         let mut afi = [0u8; 2];
         afi.copy_from_slice(&src[0..2]);
         let afi = u16::from_be_bytes(afi);
-        let afi: AFI = FromPrimitive::from_u16(afi).unwrap();
+        let afi: Afi = FromPrimitive::from_u16(afi).unwrap();
 
         let mut safi = [0u8; 1];
         safi.copy_from_slice(&src[2..3]);
         let safi = u8::from_be_bytes(safi);
-        let safi: SAFI = FromPrimitive::from_u8(safi).unwrap();
+        let safi: Safi = FromPrimitive::from_u8(safi).unwrap();
 
         let mut nhl = [0u8; 1];
         nhl.copy_from_slice(&src[3..4]);
@@ -1218,9 +1207,9 @@ impl From<Vec<u8>> for MPNLRI {
         let nh: IpAddr;
         let mut i = 4 + nhl + 1;
 
-        let mut nlris: Vec<NLRI> = vec![];
+        let mut nlris: Vec<Nlri> = vec![];
         match afi {
-            AFI::Ipv4 => {
+            Afi::Ipv4 => {
                 addr.resize(4, 0);
                 nh = IpAddr::V4(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]));
 
@@ -1230,13 +1219,13 @@ impl From<Vec<u8>> for MPNLRI {
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: NLRI = buf.into();
-                    nlris.push(n.clone());
+                    let n: Nlri = buf.into();
+                    nlris.push(n);
                     let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
                     i += blen;
                 }
             }
-            AFI::Ipv6 => {
+            Afi::Ipv6 => {
                 addr.resize(16, 0);
                 let mut addr6: Vec<u16> = vec![];
                 let mut j = 0;
@@ -1258,15 +1247,15 @@ impl From<Vec<u8>> for MPNLRI {
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: NLRI = buf.into();
-                    nlris.push(n.clone());
+                    let n: Nlri = buf.into();
+                    nlris.push(n);
                     let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
                     i += blen;
                 }
             }
         }
         let af = AddressFamily { afi, safi };
-        MPNLRI {
+        Mpnlri {
             af,
             // afi,
             // safi,
@@ -1276,37 +1265,36 @@ impl From<Vec<u8>> for MPNLRI {
     }
 }
 
-impl Into<Vec<u8>> for MPNLRI {
-    fn into(self) -> Vec<u8> {
+impl From<Mpnlri> for Vec<u8> {
+    fn from(val: Mpnlri) -> Self {
         let mut buf = Cursor::new(vec![]);
         let mut blen = 3;
-        buf.write(&vec![blen as u8]).unwrap();
-        buf.write_u16::<BigEndian>((self.af.afi as u16).into())
-            .unwrap();
-        buf.write(&vec![self.af.safi as u8]).unwrap();
-        match self.nh {
+        buf.write_u8(blen as u8).unwrap();
+        buf.write_u16::<BigEndian>(val.af.afi as u16).unwrap();
+        buf.write_u8(val.af.safi as u8).unwrap();
+        match val.nh {
             IpAddr::V4(v) => {
-                buf.write(&vec![4 as u8]).unwrap();
+                buf.write_u8(4).unwrap();
                 let addrv4: u32 = v.into();
                 let addr = addrv4.to_be_bytes();
-                buf.write(&addr[0..4]).unwrap();
-                blen += 5;
+                buf.write_all(&addr[0..4]).unwrap();
+                blen += 5
             }
             IpAddr::V6(v) => {
-                buf.write(&vec![16 as u8]).unwrap();
+                buf.write_u8(16).unwrap();
                 let addrv6: u128 = v.into();
                 let addr = addrv6.to_be_bytes();
-                buf.write(&addr[0..16]).unwrap();
+                buf.write_all(&addr[0..16]).unwrap();
                 blen += 17;
             }
         }
-        for n in self.nlris {
+        for n in val.nlris {
             let nbuf: Vec<u8> = n.into();
             blen += nbuf.len();
-            buf.write(&nbuf).unwrap();
+            buf.write_all(&nbuf).unwrap();
         }
         buf.rewind().unwrap();
-        buf.write(&vec![blen as u8]).unwrap();
+        buf.write_u8(blen as u8).unwrap();
         buf.into_inner()
     }
 }
@@ -1343,12 +1331,12 @@ impl From<Vec<u8>> for BGPNotificationMessage {
     }
 }
 
-impl Into<Vec<u8>> for BGPNotificationMessage {
-    fn into(self) -> Vec<u8> {
+impl From<BGPNotificationMessage> for Vec<u8> {
+    fn from(val: BGPNotificationMessage) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write(&vec![self.error_code.clone() as u8]).unwrap();
-        buf.write(&vec![self.error_subcode.clone()]).unwrap();
-        buf.write(&self.data).unwrap();
+        buf.write_u8(val.error_code as u8).unwrap();
+        buf.write_u8(val.error_subcode).unwrap();
+        buf.write_all(&val.data).unwrap();
         buf.into_inner()
     }
 }
@@ -1367,8 +1355,8 @@ impl BGPKeepaliveMessage {
     }
 }
 
-impl Into<Vec<u8>> for BGPKeepaliveMessage {
-    fn into(self) -> Vec<u8> {
+impl From<BGPKeepaliveMessage> for Vec<u8> {
+    fn from(_val: BGPKeepaliveMessage) -> Self {
         vec![]
     }
 }
@@ -1377,7 +1365,7 @@ pub struct BGPMessageCodec;
 pub type BGPConnection = Framed<TcpStream, BGPMessageCodec>;
 
 impl BGPMessageCodec {
-    pub async fn frame_it(socket: TcpStream) -> Result<BGPConnection, std::io::Error> {
+    pub async fn _frame_it(socket: TcpStream) -> Result<BGPConnection, std::io::Error> {
         let server = Framed::new(socket, BGPMessageCodec);
         Ok(server)
     }
@@ -1394,7 +1382,7 @@ impl Decoder for BGPMessageCodec {
         if !src.starts_with(&MARKER) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Message should start with marker",),
+                "Message should start with marker".to_string(),
             ));
         }
         let mut length_bytes = [0u8; 2];
@@ -1447,13 +1435,13 @@ impl Default for BGPMessageBody {
         Self::Keepalive(msg)
     }
 }
-impl Into<Vec<u8>> for BGPMessageBody {
-    fn into(self) -> Vec<u8> {
-        match self {
-            Self::Open(body) => body.into(),
-            Self::Update(body) => body.into(),
-            Self::Notification(body) => body.into(),
-            Self::Keepalive(body) => body.into(),
+impl From<BGPMessageBody> for Vec<u8> {
+    fn from(val: BGPMessageBody) -> Self {
+        match val {
+            BGPMessageBody::Open(body) => body.into(),
+            BGPMessageBody::Update(body) => body.into(),
+            BGPMessageBody::Notification(body) => body.into(),
+            BGPMessageBody::Keepalive(body) => body.into(),
         }
     }
 }
@@ -1479,19 +1467,19 @@ impl From<Vec<u8>> for Message {
         let srclength = src.len();
         let v = src[19..srclength].to_vec();
         let body = match mtype {
-            MessageType::OPEN => {
+            MessageType::Open => {
                 let msg: BGPOpenMessage = v.into();
                 BGPMessageBody::Open(msg)
             }
-            MessageType::UPDATE => {
+            MessageType::Update => {
                 let msg: BGPUpdateMessage = v.into();
                 BGPMessageBody::Update(msg)
             }
-            MessageType::NOTIFICATION => {
+            MessageType::Notification => {
                 let msg: BGPNotificationMessage = v.into();
                 BGPMessageBody::Notification(msg)
             }
-            MessageType::KEEPALIVE => {
+            MessageType::Keepalive => {
                 let msg = BGPKeepaliveMessage::new().unwrap();
                 BGPMessageBody::Keepalive(msg)
             }
@@ -1504,20 +1492,12 @@ impl From<Vec<u8>> for Message {
             .unwrap()
     }
 }
-impl Into<Vec<u8>> for Message {
-    fn into(self) -> Vec<u8> {
-        // 3 is the static number of bytes in a bgp header msg
-        // let len: u16 = (MARKER.len() + 3 + self.body.len()) as u16;
-
-        // let mut buf = Cursor::new(MARKER.to_vec());
+impl From<Message> for Vec<u8> {
+    fn from(val: Message) -> Self {
         let mut buf = Cursor::new(vec![]);
-        // let _ = buf.seek(SeekFrom::End(0));
-        // buf.write_u16::<BigEndian>(len).unwrap();
-        buf.write_u8(self.header.message_type.clone() as u8)
-            .unwrap();
-
-        let v: Vec<u8> = self.body.into();
-        buf.write(&v[0..]).unwrap();
+        buf.write_u8(val.header.message_type.clone() as u8).unwrap();
+        let v: Vec<u8> = val.body.into();
+        buf.write_all(&v[0..]).unwrap();
         buf.into_inner()
     }
 }
@@ -1536,7 +1516,7 @@ impl Message {
             .build()?)
     }
 
-    fn add_marker(buf: &mut Vec<u8>) {
+    fn _add_marker(buf: &mut Vec<u8>) {
         let mut marker = MARKER.to_vec();
         buf.append(&mut marker)
     }
@@ -1546,7 +1526,7 @@ impl Message {
 mod tests {
 
     use super::*;
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_update_to_u8() {
@@ -1563,7 +1543,7 @@ mod tests {
                 partial: false,
                 extended_length: false,
                 type_code: PathAttributeType::Origin,
-                value: PathAttributeValue::Origin(OriginType::IGP),
+                value: PathAttributeValue::Origin(OriginType::Igp),
             },
             PathAttribute {
                 optional: false,
@@ -1589,14 +1569,14 @@ mod tests {
             },
         ]
         .to_vec();
-        let nlri: Vec<NLRI> = [
-            NLRI {
+        let nlri: Vec<Nlri> = [
+            Nlri {
                 net: "10.10.1.0/24".parse().unwrap(),
             },
-            NLRI {
+            Nlri {
                 net: "10.10.2.0/24".parse().unwrap(),
             },
-            NLRI {
+            Nlri {
                 net: "10.10.3.0/24".parse().unwrap(),
             },
         ]
@@ -1627,7 +1607,7 @@ mod tests {
                 partial: false,
                 extended_length: false,
                 type_code: PathAttributeType::Origin,
-                value: PathAttributeValue::Origin(OriginType::IGP),
+                value: PathAttributeValue::Origin(OriginType::Igp),
             },
             PathAttribute {
                 optional: false,
@@ -1653,14 +1633,14 @@ mod tests {
             },
         ]
         .to_vec();
-        let nlri: Vec<NLRI> = [
-            NLRI {
+        let nlri: Vec<Nlri> = [
+            Nlri {
                 net: "10.10.1.0/24".parse().unwrap(),
             },
-            NLRI {
+            Nlri {
                 net: "10.10.2.0/24".parse().unwrap(),
             },
-            NLRI {
+            Nlri {
                 net: "10.10.3.0/24".parse().unwrap(),
             },
         ]
@@ -1689,7 +1669,7 @@ mod tests {
                 partial: false,
                 extended_length: false,
                 type_code: PathAttributeType::Origin,
-                value: PathAttributeValue::Origin(OriginType::IGP),
+                value: PathAttributeValue::Origin(OriginType::Igp),
             },
             PathAttribute {
                 optional: false,
@@ -1723,7 +1703,7 @@ mod tests {
             },
         ]
         .to_vec();
-        let nlri: Vec<NLRI> = [NLRI {
+        let nlri: Vec<Nlri> = [Nlri {
             net: "2.0.0.0/8".parse().unwrap(),
         }]
         .to_vec();
@@ -1752,7 +1732,7 @@ mod tests {
                 partial: false,
                 extended_length: false,
                 type_code: PathAttributeType::Origin,
-                value: PathAttributeValue::Origin(OriginType::INCOMPLETE),
+                value: PathAttributeValue::Origin(OriginType::Incomplete),
             },
             PathAttribute {
                 optional: false,
@@ -1803,7 +1783,7 @@ mod tests {
             },
         ]
         .to_vec();
-        let nlri: Vec<NLRI> = [NLRI {
+        let nlri: Vec<Nlri> = [Nlri {
             net: "172.16.0.0/21".parse().unwrap(),
         }]
         .to_vec();
@@ -1819,13 +1799,13 @@ mod tests {
     #[test]
     fn test_u8_to_nlri1() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![24, 192, 168, 1],
         };
-        let u: NLRI = v.into();
+        let u: Nlri = v.into();
 
         assert_eq!(n, u);
     }
@@ -1833,13 +1813,13 @@ mod tests {
     #[test]
     fn test_u8_to_nlri2() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![32, 192, 168, 1, 1],
         };
-        let u: NLRI = v.into();
+        let u: Nlri = v.into();
 
         assert_eq!(n, u);
     }
@@ -1847,13 +1827,13 @@ mod tests {
     #[test]
     fn test_u8_to_nlri3() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![25, 192, 168, 1, 128],
         };
-        let u: NLRI = v.into();
+        let u: Nlri = v.into();
 
         assert_eq!(n, u);
     }
@@ -1861,39 +1841,39 @@ mod tests {
     #[test]
     fn test_into_nlri_24() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 0), 24).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![24, 192, 168, 1],
         };
-        let n1: NLRI = v.into();
+        let n1: Nlri = v.into();
         assert_eq!(n.net, n1.net);
     }
 
     #[test]
     fn test_into_nlri_32() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 1), 32).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![32, 192, 168, 1, 1],
         };
-        let n1: NLRI = v.into();
+        let n1: Nlri = v.into();
         assert_eq!(n.net, n1.net);
     }
 
     #[test]
     fn test_into_nlri_25() {
         let net = Ipv4Net::new(Ipv4Addr::new(192, 168, 1, 128), 25).unwrap();
-        let n = NLRI {
+        let n = Nlri {
             net: IpNet::V4(net),
         };
         let v = Ipv4Octets {
             octets: vec![25, 192, 168, 1, 128],
         };
-        let n1: NLRI = v.into();
+        let n1: Nlri = v.into();
         assert_eq!(n.net, n1.net);
     }
 
@@ -1901,8 +1881,8 @@ mod tests {
     fn test_opt_params() {
         let mut plist: Vec<BGPOptionalParameter> = vec![];
         let cv: BGPCapabilityMultiprotocol = BGPCapabilityMultiprotocol {
-            afi: AFI::Ipv4,
-            safi: SAFI::NLRIUnicast,
+            afi: Afi::Ipv4,
+            safi: Safi::NLRIUnicast,
         };
         let cv: Vec<u8> = cv.into();
         let pc: BGPCapability = BGPCapability {
@@ -1922,7 +1902,7 @@ mod tests {
         let mut v: Vec<u8> = vec![];
 
         for param in plist {
-            let mut p: Vec<u8> = param.try_into().unwrap();
+            let mut p: Vec<u8> = param.into();
             v.append(&mut p);
         }
 
@@ -1932,7 +1912,7 @@ mod tests {
 
     #[test]
     fn test_from_primitives() {
-        let t = MessageType::OPEN;
+        let t = MessageType::Open;
         let u: MessageType = FromPrimitive::from_u64(1).unwrap();
         assert_eq!(t, u)
     }
@@ -1941,20 +1921,18 @@ mod tests {
     fn test_keepalive_message() {
         let body = BGPKeepaliveMessage::new().unwrap();
         let test_msg: Vec<u8> =
-            Message::new(MessageType::KEEPALIVE, BGPMessageBody::Keepalive(body))
+            Message::new(MessageType::Keepalive, BGPMessageBody::Keepalive(body))
                 .unwrap()
-                .try_into()
-                .unwrap();
+                .into();
         let keepalive: Vec<u8> = vec![0x4];
         assert_eq!(test_msg, keepalive)
     }
     #[test]
     fn test_open_message() {
         let body = BGPOpenMessage::new(123, 345, 3, neighbor::Capabilities::default()).unwrap();
-        let test_msg: Vec<u8> = Message::new(MessageType::OPEN, BGPMessageBody::Open(body))
+        let test_msg: Vec<u8> = Message::new(MessageType::Open, BGPMessageBody::Open(body))
             .unwrap()
-            .try_into()
-            .unwrap();
+            .into();
         let open: Vec<u8> = vec![
             0x1, 0x4, 0x0, 0x7b, 0x0, 0x3, 0x0, 0x0, 0x1, 0x59, 0x8, 0x2, 0x6, 0x1, 0x4, 0x0, 0x1,
             0x0, 0x1,

@@ -11,24 +11,19 @@ use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::bgp::{self, AddressFamily, Message, PathAttributeType, PathAttributeValue, NLRI};
+use crate::bgp::{self, AddressFamily, Message, Nlri, PathAttributeType, PathAttributeValue};
 use crate::rib::{self, RibUpdate, RouteAttributes};
 use crate::speaker::{self};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum BGPState {
     Idle,
     Connect,
+    #[default]
     Active,
     OpenSent,
     OpenConfirm,
     Established,
-}
-
-impl Default for BGPState {
-    fn default() -> Self {
-        BGPState::Active
-    }
 }
 
 #[derive(Default, Builder, Debug, Clone, Copy)]
@@ -88,7 +83,7 @@ pub enum Event {
     KeepAliveMsg,
     UpdateMsg,
     UpdateMsgErr,
-    RibUpdate(Vec<(bgp::NLRI, Option<rib::RouteAttributes>)>),
+    RibUpdate(Vec<(bgp::Nlri, Option<rib::RouteAttributes>)>),
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +105,7 @@ pub struct BGPNeighbor {
     attributes: BGPSessionAttributes,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Capabilities {
     pub multiprotocol: Option<Vec<bgp::AddressFamily>>,
     pub route_refresh: bool,
@@ -166,18 +161,18 @@ impl From<bgp::BGPCapabilities> for Capabilities {
     }
 }
 
-impl Default for Capabilities {
-    fn default() -> Self {
-        Capabilities {
-            multiprotocol: None,
-            route_refresh: false,
-            outbound_route_filtering: false,
-            extended_next_hop_encoding: false,
-            graceful_restart: false,
-            four_octect_asn: None,
-        }
-    }
-}
+// impl Default for Capabilities {
+//     fn default() -> Self {
+//         Capabilities {
+//             multiprotocol: None,
+//             route_refresh: false,
+//             outbound_route_filtering: false,
+//             extended_next_hop_encoding: false,
+//             graceful_restart: false,
+//             four_octect_asn: None,
+//         }
+//     }
+// }
 
 impl BGPNeighbor {
     pub fn new(
@@ -203,8 +198,10 @@ impl BGPNeighbor {
             .allow_automatic_start(true)
             .build()
             .unwrap();
-        let mut capabilities_advertised = Capabilities::default();
-        capabilities_advertised.multiprotocol = families;
+        let capabilities_advertised = Capabilities {
+            multiprotocol: families,
+            ..Default::default()
+        };
         BGPNeighbor {
             local_ip,
             local_port,
@@ -323,7 +320,7 @@ impl BGPNeighbor {
             n.local_port = Some(local_addr.port());
             {
                 let s = speaker.lock().await;
-                n.ribtx = s.ribtx.clone();
+                n.ribtx.clone_from(&s.ribtx);
             }
         }
 
@@ -407,13 +404,12 @@ impl BGPNeighbor {
                 }
                 _ => {}
             },
-            None => match state {
-                BGPState::Idle => {
+            None => {
+                if let BGPState::Idle = state {
                     println!("FSM IDLE: received {:?}", e);
                     BGPNeighbor::process_event_idle(e, nb).await;
                 }
-                _ => {}
-            },
+            }
         }
     }
 
@@ -449,10 +445,10 @@ impl BGPNeighbor {
     ) {
         match e {
             Event::KeepaliveTimerExpires => {
-                let _ = BGPNeighbor::send_keepalive(server).await.unwrap();
+                BGPNeighbor::send_keepalive(server).await.unwrap();
             }
             Event::ManualStart => {
-                let _ = BGPNeighbor::send_keepalive(server).await.unwrap();
+                BGPNeighbor::send_keepalive(server).await.unwrap();
             }
             Event::AutomaticStart => {
                 BGPNeighbor::init_peer(nb).await;
@@ -472,7 +468,7 @@ impl BGPNeighbor {
                     let n = nb.lock().await;
                     capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
+                BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
                 {
@@ -521,7 +517,7 @@ impl BGPNeighbor {
                     let n = nb.lock().await;
                     capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
+                BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
                 {
@@ -580,7 +576,7 @@ impl BGPNeighbor {
     ) {
         match e {
             Event::KeepaliveTimerExpires => {
-                let _ = BGPNeighbor::send_keepalive(server).await.unwrap();
+                BGPNeighbor::send_keepalive(server).await.unwrap();
             }
             Event::TcpConnectionFails => {
                 println!("FSM OPENCONFIRM: {:?} to be implemented", e);
@@ -603,7 +599,7 @@ impl BGPNeighbor {
                     let n = nb.lock().await;
                     capabilities = n.capabilities_advertised.clone();
                 }
-                let _ = BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
+                BGPNeighbor::send_open(server, asn, rid, hold, capabilities)
                     .await
                     .unwrap();
             }
@@ -638,7 +634,7 @@ impl BGPNeighbor {
                 println!("FSM ESTABLISHED: {:?} to be implemented", e);
             }
             Event::KeepaliveTimerExpires => {
-                let _ = BGPNeighbor::send_keepalive(server).await.unwrap();
+                BGPNeighbor::send_keepalive(server).await.unwrap();
             }
             Event::RibUpdate(nlris) => {
                 let _ = BGPNeighbor::send_update(server, nb.clone(), nlris).await;
@@ -793,11 +789,9 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_connect(m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
-        match m.body {
-            _ => {
-                println!("FSM: Shouldn't receive messages in Connect state");
-            }
+    async fn process_message_connect(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
+        {
+            println!("FSM: Shouldn't receive messages in Connect state");
         };
     }
 
@@ -856,11 +850,9 @@ impl BGPNeighbor {
         };
     }
 
-    async fn process_message_idle(m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
-        match m.body {
-            _ => {
-                println!("Unimplemented");
-            }
+    async fn process_message_idle(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
+        {
+            println!("Unimplemented");
         };
     }
 
@@ -870,10 +862,7 @@ impl BGPNeighbor {
     }
 
     pub async fn is_established(&self) -> bool {
-        match self.attributes.state {
-            BGPState::Established => true,
-            _ => false,
-        }
+        matches!(self.attributes.state, BGPState::Established)
     }
 
     async fn adjrib_add(&mut self, af: AddressFamily, routes: RibUpdate) {
@@ -922,9 +911,9 @@ impl BGPNeighbor {
             if rec.contains(&af) {
                 let s = s.lock().await;
                 let r = s.rib.get(&af).unwrap().lock().await;
-                let routes: Vec<(NLRI, Option<RouteAttributes>)> = r
+                let routes: Vec<(Nlri, Option<RouteAttributes>)> = r
                     .iter()
-                    .map(|(n, a)| (n.clone(), Some(a.first().unwrap().clone())))
+                    .map(|(n, a)| (*n, Some(a.first().unwrap().clone())))
                     .collect();
                 let tx = nb.tx.clone();
                 tx.unwrap().send(Event::RibUpdate(routes)).await.unwrap();
@@ -938,8 +927,8 @@ impl BGPNeighbor {
         nb: Arc<Mutex<BGPNeighbor>>,
     ) {
         let mut af = AddressFamily {
-            afi: bgp::AFI::Ipv4,
-            safi: bgp::SAFI::NLRIUnicast,
+            afi: bgp::Afi::Ipv4,
+            safi: bgp::Safi::NLRIUnicast,
         };
         let mut nlris = vec![];
         let mut withdrawn = vec![];
@@ -983,7 +972,7 @@ impl BGPNeighbor {
             rid: 0,
         };
 
-        if withdrawn.len() > 0 {
+        if !withdrawn.is_empty() {
             let updates = RibUpdate {
                 nlris: withdrawn,
                 attributes: attributes.clone(),
@@ -994,7 +983,7 @@ impl BGPNeighbor {
                 nb.adjrib_withdraw(af.clone(), updates.clone()).await;
             }
         }
-        if nlris.len() > 0 {
+        if !nlris.is_empty() {
             let updates = RibUpdate { nlris, attributes };
             msg.added = Some(updates.clone());
             {
@@ -1087,7 +1076,7 @@ impl BGPNeighbor {
         let body = bgp::BGPOpenMessage::new(asn, rid, hold, capabilities).unwrap();
         println!("open :{:?}", body);
         let message: Vec<u8> =
-            bgp::Message::new(bgp::MessageType::OPEN, bgp::BGPMessageBody::Open(body))
+            bgp::Message::new(bgp::MessageType::Open, bgp::BGPMessageBody::Open(body))
                 .unwrap()
                 .into();
         println!("message :{:?}", message);
@@ -1104,13 +1093,13 @@ impl BGPNeighbor {
     async fn send_update(
         server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
         neighbor: Arc<Mutex<BGPNeighbor>>,
-        nlris: Vec<(NLRI, Option<RouteAttributes>)>,
+        nlris: Vec<(Nlri, Option<RouteAttributes>)>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut wd: Vec<NLRI> = vec![];
-        let mut updates: HashMap<RouteAttributes, Vec<NLRI>> = HashMap::new();
+        let mut wd: Vec<Nlri> = vec![];
+        let mut updates: HashMap<RouteAttributes, Vec<Nlri>> = HashMap::new();
         for (n, a) in nlris {
             match a {
-                None => wd.push(n.clone()),
+                None => wd.push(n),
                 Some(route_attributes) => match updates.get_mut(&route_attributes) {
                     None => {
                         let router_id;
@@ -1118,7 +1107,7 @@ impl BGPNeighbor {
                             let neighbor = neighbor.lock().await;
                             router_id = neighbor.remote_rid.unwrap();
                         }
-                        if !route_attributes.from_neighbor(router_id) {
+                        if !route_attributes.is_from_neighbor(router_id) {
                             updates.insert(route_attributes.clone(), vec![n]);
                         }
                     }
@@ -1128,7 +1117,7 @@ impl BGPNeighbor {
                 },
             }
         }
-        if updates.len() > 0 || wd.len() > 0 {
+        if !updates.is_empty() || !wd.is_empty() {
             for (mut ra, routes) in updates {
                 {
                     let neighbor = neighbor.lock().await;
@@ -1138,10 +1127,8 @@ impl BGPNeighbor {
                     if local_asn != remote_asn {
                         ra.next_hop = local_ip;
                         ra.prepend(local_asn, 1);
-                    } else {
-                        if ra.from_ibgp() {
-                            break;
-                        }
+                    } else if ra.is_from_ibgp() {
+                        break;
                     }
                 }
                 let pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
@@ -1155,7 +1142,7 @@ impl BGPNeighbor {
                     .build()
                     .unwrap();
                 let message: Vec<u8> =
-                    Message::new(bgp::MessageType::UPDATE, bgp::BGPMessageBody::Update(body))
+                    Message::new(bgp::MessageType::Update, bgp::BGPMessageBody::Update(body))
                         .unwrap()
                         .into();
                 match server.send(message).await {
@@ -1176,7 +1163,7 @@ impl BGPNeighbor {
     ) -> Result<(), Box<dyn Error>> {
         let body = bgp::BGPKeepaliveMessage::new().unwrap();
         let message: Vec<u8> = bgp::Message::new(
-            bgp::MessageType::KEEPALIVE,
+            bgp::MessageType::Keepalive,
             bgp::BGPMessageBody::Keepalive(body.clone()),
         )
         .unwrap()
