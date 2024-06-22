@@ -86,9 +86,9 @@ impl State for GrpcServer {
         let mut entries = vec![];
 
         let afi = request.get_ref().afi as u16;
-        let afi: bgp::AFI = FromPrimitive::from_u16(afi).unwrap();
+        let afi: bgp::Afi = FromPrimitive::from_u16(afi).unwrap();
         let safi = request.get_ref().safi as u8;
-        let safi: bgp::SAFI = FromPrimitive::from_u8(safi).unwrap();
+        let safi: bgp::Safi = FromPrimitive::from_u8(safi).unwrap();
 
         let af = bgp::AddressFamily { afi, safi };
 

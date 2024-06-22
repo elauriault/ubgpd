@@ -163,7 +163,7 @@ impl BGPSpeaker {
                 speaker.fib.insert(af, fib.clone());
                 let r1 = rib.clone();
                 let f1 = fib.clone();
-                let asn = speaker.local_asn.clone();
+                let asn = speaker.local_asn;
                 let neighbors = speaker.neighbors.clone();
                 tokio::spawn(async move {
                     BGPSpeaker::rib_mgr(r1, f1, neighbors, asn, rib_rx, fib_tx).await
@@ -226,7 +226,7 @@ impl BGPSpeaker {
         fib: Arc<Mutex<fib::Fib>>,
         asn: u16,
         routes: rib::RibUpdate,
-    ) -> Vec<(bgp::NLRI, Option<rib::RouteAttributes>)> {
+    ) -> Vec<(bgp::Nlri, Option<rib::RouteAttributes>)> {
         let mut modified = vec![];
         // println!("Adding routes {:?} from {:?}", routes, msg.rid);
         let mut rib = rib.lock().await;
@@ -234,11 +234,11 @@ impl BGPSpeaker {
             match rib.get_mut(&nlri) {
                 None => {
                     if routes.attributes.is_valid(asn).await {
-                        rib.insert(nlri.clone(), vec![routes.attributes.clone()]);
+                        rib.insert(nlri, vec![routes.attributes.clone()]);
                         {
                             let fib = fib.lock().await;
                             if fib.has_route(routes.attributes.clone().next_hop) {
-                                modified.push((nlri.clone(), Some(routes.attributes.clone())));
+                                modified.push((nlri, Some(routes.attributes.clone())));
                             }
                         }
                     }
@@ -257,15 +257,11 @@ impl BGPSpeaker {
                             if fib.has_route(routes.attributes.clone().next_hop) {
                                 match previous_best {
                                     None => {
-                                        modified
-                                            .push((nlri.clone(), Some(routes.attributes.clone())));
+                                        modified.push((nlri, Some(routes.attributes.clone())));
                                     }
                                     Some(best) => {
                                         if routes.attributes > best {
-                                            modified.push((
-                                                nlri.clone(),
-                                                Some(routes.attributes.clone()),
-                                            ));
+                                            modified.push((nlri, Some(routes.attributes.clone())));
                                         }
                                     }
                                 }
@@ -282,7 +278,7 @@ impl BGPSpeaker {
         rib: Arc<Mutex<rib::Rib>>,
         fib: Arc<Mutex<fib::Fib>>,
         routes: rib::RibUpdate,
-    ) -> Vec<(bgp::NLRI, Option<rib::RouteAttributes>)> {
+    ) -> Vec<(bgp::Nlri, Option<rib::RouteAttributes>)> {
         let mut modified = vec![];
         let mut rib = rib.lock().await;
         for nlri in routes.nlris {
@@ -292,8 +288,8 @@ impl BGPSpeaker {
                     let previous_best =
                         Self::best_reachable(fib.clone(), all_attributes.to_vec()).await;
 
-                    all_attributes.retain(|a| !a.from_neighbor(routes.attributes.peer_rid));
-                    if all_attributes.len() == 0 {
+                    all_attributes.retain(|a| !a.is_from_neighbor(routes.attributes.peer_rid));
+                    if all_attributes.is_empty() {
                         rib.remove(&nlri);
                     }
 
@@ -301,7 +297,7 @@ impl BGPSpeaker {
                         None => {}
                         Some(best) => {
                             if best.peer_rid == routes.attributes.peer_rid {
-                                modified.push((nlri.clone(), None));
+                                modified.push((nlri, None));
                             }
                         }
                     }
@@ -347,7 +343,7 @@ impl BGPSpeaker {
                             modified.append(&mut withdraw);
                         }
                     };
-                    if modified.len() > 0 {
+                    if !modified.is_empty() {
                         let _ = tx.send(FibEvent::RibUpdated).await;
                         for n in &neighbors {
                             let n = n.lock().await;

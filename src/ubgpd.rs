@@ -50,8 +50,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(i) => Some(i),
         None => {
             let a = bgp::AddressFamily {
-                afi: bgp::AFI::Ipv4,
-                safi: bgp::SAFI::NLRIUnicast,
+                afi: bgp::Afi::Ipv4,
+                safi: bgp::Safi::NLRIUnicast,
             };
             Some(vec![a])
         }

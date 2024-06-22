@@ -12,7 +12,7 @@ use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, Ro
 use rtnetlink::{new_connection, Handle, IpVersion};
 // use std::error::Error;
 
-use crate::bgp::{AddressFamily, AFI};
+use crate::bgp::{AddressFamily, Afi};
 use crate::rib::{self};
 
 #[derive(Debug, PartialEq, Clone)]
@@ -106,36 +106,30 @@ impl Fib {
         {
             let rib = rib.lock().await;
             for (n, a) in rib.iter() {
-                match a.iter().find(|a| self.has_route(a.next_hop)) {
-                    Some(a) => {
-                        println!("{:?} : {:?}", n, a);
-                        match self
-                            .find_route(n.clone().into(), a.next_hop, handle.clone())
-                            .await
-                        {
-                            Some(_t) => {
-                                println!("Route {:?} already present, skipping it", n);
-                            }
-                            None => {
-                                println!("Route {:?}  is not present, adding it", n);
-                                self.add_route(n.into(), a.next_hop, handle.clone()).await;
-                            }
+                if let Some(a) = a.iter().find(|a| self.has_route(a.next_hop)) {
+                    println!("{:?} : {:?}", n, a);
+                    match self
+                        .find_route((*n).into(), a.next_hop, handle.clone())
+                        .await
+                    {
+                        Some(_t) => {
+                            println!("Route {:?} already present, skipping it", n);
+                        }
+                        None => {
+                            println!("Route {:?}  is not present, adding it", n);
+                            self.add_route(n.into(), a.next_hop, handle.clone()).await;
                         }
                     }
-                    None => {}
                 }
             }
         }
     }
 
     pub fn has_route(&self, addr: IpAddr) -> bool {
-        self.routes
-            .iter()
-            .find(|fe| match fe.prefix {
-                None => false,
-                Some(prefix) => prefix.contains(&addr),
-            })
-            .is_some()
+        self.routes.iter().any(|fe| match fe.prefix {
+            None => false,
+            Some(prefix) => prefix.contains(&addr),
+        })
     }
 
     async fn find_route(
@@ -145,8 +139,8 @@ impl Fib {
         _handle: Handle,
     ) -> Option<FibEntry> {
         let routes = self.routes.clone();
-        let subnet = IpNet::from(subnet);
-        let nexthop = IpAddr::from(nexthop);
+        // let subnet = IpNet::from(subnet);
+        // let nexthop = IpAddr::from(nexthop);
         routes.into_iter().find_map(|fe| {
             if fe.prefix == Some(subnet) && fe.next_hop == Some(nexthop) {
                 Some(fe)
@@ -200,21 +194,18 @@ impl Fib {
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
         let mut routes = match af.afi {
-            AFI::Ipv4 => handle.route().get(IpVersion::V4).execute(),
-            AFI::Ipv6 => handle.route().get(IpVersion::V6).execute(),
+            Afi::Ipv4 => handle.route().get(IpVersion::V4).execute(),
+            Afi::Ipv6 => handle.route().get(IpVersion::V6).execute(),
         };
         // let mut v: Vec<RouteMessage> = vec![];
         let mut v = vec![];
         while let Some(route) = routes.try_next().await.unwrap_or(None) {
             v.push(route);
         }
-        let z = stream::iter(v.clone())
-            .then(|b| FibEntry::from_rtnl(b))
+        stream::iter(v.clone())
+            .then(FibEntry::from_rtnl)
             .collect::<Vec<FibEntry>>()
-            .await;
-
-        // let z = vec![];
-        z
+            .await
     }
 }
 

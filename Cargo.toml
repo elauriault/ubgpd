@@ -39,6 +39,7 @@ clap = { version = "^4", features = ["derive"] }
 itertools = "*"
 tonic = "0.10"
 prost = "0.12"
+pretty_assertions = "1.4.0"
 
 [build-dependencies]
 tonic-build = "0.10"
