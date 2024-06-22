@@ -1362,6 +1362,7 @@ impl From<BGPKeepaliveMessage> for Vec<u8> {
 }
 
 pub struct BGPMessageCodec;
+#[allow(dead_code)]
 pub type BGPConnection = Framed<TcpStream, BGPMessageCodec>;
 
 impl BGPMessageCodec {

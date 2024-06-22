@@ -161,20 +161,8 @@ impl From<bgp::BGPCapabilities> for Capabilities {
     }
 }
 
-// impl Default for Capabilities {
-//     fn default() -> Self {
-//         Capabilities {
-//             multiprotocol: None,
-//             route_refresh: false,
-//             outbound_route_filtering: false,
-//             extended_next_hop_encoding: false,
-//             graceful_restart: false,
-//             four_octect_asn: None,
-//         }
-//     }
-// }
-
 impl BGPNeighbor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         local_ip: Option<IpAddr>,
         local_port: Option<u16>,
