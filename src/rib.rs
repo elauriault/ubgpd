@@ -1,4 +1,5 @@
 use async_std::sync::{Arc, Mutex};
+use std::hash::{Hash, Hasher};
 // use futures::stream::Next;
 // use netlink_packet_route::AddressFamily;
 // use ipnet::IpAdd;
@@ -13,7 +14,7 @@ use crate::bgp::{self, PathAttribute};
 // use crate::fib;
 use crate::neighbor;
 
-#[derive(Debug, Eq, Clone, Hash)]
+#[derive(Debug, Eq, Clone)]
 pub struct RouteAttributes {
     as_path: bgp::Aspath,
     origin: bgp::OriginType,
@@ -190,57 +191,19 @@ impl PartialEq for RouteAttributes {
     }
 }
 
+impl Hash for RouteAttributes {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let len: usize = self.as_path.iter().map(|x| x.len()).sum();
+        self.local_pref.hash(state);
+        self.multi_exit_disc.hash(state);
+        self.origin.hash(state);
+        len.hash(state);
+    }
+}
+
 impl PartialOrd for RouteAttributes {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let lp = self.local_pref.partial_cmp(&other.local_pref);
-        if lp != Some(Ordering::Equal) {
-            return lp;
-        }
-
-        let pt = self.path_type.partial_cmp(&other.path_type);
-        if pt != Some(Ordering::Equal) {
-            return pt;
-        }
-
-        let slen: usize = self.as_path.iter().map(|x| x.len()).sum();
-        let olen: usize = other.as_path.iter().map(|x| x.len()).sum();
-        let path_len = slen.partial_cmp(&olen);
-        if path_len != Some(Ordering::Equal) {
-            return path_len;
-        }
-
-        let otype = self.origin.partial_cmp(&other.origin);
-        if otype != Some(Ordering::Equal) {
-            return otype;
-        }
-
-        let med = self.multi_exit_disc.partial_cmp(&other.multi_exit_disc);
-        if med != Some(Ordering::Equal) {
-            return med;
-        }
-
-        let peer = self.peer_type.partial_cmp(&other.peer_type);
-        if peer != Some(Ordering::Equal) {
-            return peer;
-        }
-
-        if self.peer_type == PeeringType::Ibgp {
-            // check igp of path and return the lowest
-        }
-
-        if self.peer_type == PeeringType::Ebgp {
-            let r_time = self.recv_time.partial_cmp(&other.recv_time);
-            if r_time != Some(Ordering::Equal) {
-                return r_time;
-            }
-        }
-
-        let rid = self.peer_rid.partial_cmp(&other.peer_rid);
-        if rid != Some(Ordering::Equal) {
-            return rid;
-        }
-
-        self.peer_ip.partial_cmp(&other.peer_ip)
+        Some(self.cmp(other))
     }
 }
 
