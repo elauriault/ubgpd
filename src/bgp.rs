@@ -91,12 +91,6 @@ pub enum MessageType {
     Keepalive,
 }
 
-// impl Default for MessageType {
-//     fn default() -> Self {
-//         MessageType::UPDATE
-//     }
-// }
-
 #[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
 pub enum ErrorCode {
