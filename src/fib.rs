@@ -89,7 +89,6 @@ pub struct Fib {
 impl Fib {
     pub async fn new(af: AddressFamily) -> Self {
         let mut fib = Fib { af, routes: vec![] };
-        // let mut fib = Fib { routes: vec![] };
         fib.refresh().await;
         fib
     }

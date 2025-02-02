@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use anyhow::Result;
+use clap::{Args, Parser, Subcommand};
 use ubgp::config_client::ConfigClient;
 use ubgp::state_client::StateClient;
 use ubgp::NeighborRequest;
@@ -36,7 +37,7 @@ struct RibArgs {
     safi: u32,
 }
 
-#[derive(clap::Args)]
+#[derive(Args)]
 #[command(author, version, about, long_about = None)]
 struct NeighborsArgs {
     #[arg(short, long, value_parser)]
@@ -48,7 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::parse();
 
     match opt.command {
-        None => {}
+        None => {
+            println!("Please provide a command. Use --help for usage information.");
+            std::process::exit(1);
+        }
         Some(Commands::Rib(rib_args)) => {
             let mut client =
                 StateClient::connect(format!("http://{}:{}", opt.server, opt.port)).await?;
