@@ -145,9 +145,7 @@ impl BGPSpeaker {
             }
             s.neighbors.push(n.clone());
         }
-        tokio::spawn(
-            async move { neighbor::BGPNeighbor::fsm_tcp(n, socket, speaker.clone()).await },
-        );
+        tokio::spawn(async move { neighbor::fsm_tcp(n, socket, speaker.clone()).await });
     }
 
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
@@ -187,7 +185,7 @@ impl BGPSpeaker {
         }
         for neighbor in neighbors {
             let speaker = speaker.clone();
-            tokio::spawn(async move { neighbor::BGPNeighbor::connect(speaker, neighbor).await });
+            tokio::spawn(async move { neighbor::connect(speaker, neighbor).await });
         }
     }
 
