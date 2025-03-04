@@ -2,8 +2,9 @@
 
 use super::session::BGPNeighbor;
 use super::types::Event;
-use async_std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 pub async fn timer_hold(

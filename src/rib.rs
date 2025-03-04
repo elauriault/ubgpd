@@ -1,5 +1,6 @@
-use async_std::sync::{Arc, Mutex};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 // use futures::stream::Next;
 // use netlink_packet_route::AddressFamily;
 // use ipnet::IpAdd;
