@@ -1,11 +1,12 @@
+use anyhow::Result;
 use byteorder::{BigEndian, WriteBytesExt};
 use derive_builder::Builder;
 use num_traits::FromPrimitive;
+use std::fmt;
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
 use std::net::IpAddr;
-use std::{error::Error, fmt};
 
 use crate::neighbor;
 
@@ -414,16 +415,16 @@ impl From<Message> for Vec<u8> {
 }
 
 impl Message {
-    pub fn new(
-        mtype: MessageType,
-        body: BGPMessageBody,
-    ) -> Result<Message, Box<dyn Error + Sync + Send>> {
+    pub fn new(mtype: MessageType, body: BGPMessageBody) -> anyhow::Result<Message> {
         let header = BGPMessageHeaderBuilder::default()
             .message_type(mtype.clone())
-            .build()?;
+            .build()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
         Ok(MessageBuilder::default()
             .header(header)
             .body(body)
-            .build()?)
+            .build()
+            .map_err(|e| anyhow::anyhow!("{}", e))?)
     }
 }

@@ -1,12 +1,10 @@
-// src/neighbor/connection.rs
-
 use super::capabilities::Capabilities;
 use super::session::BGPNeighbor;
 use crate::bgp::{self, Message, Nlri};
 use crate::rib::RouteAttributes;
+use anyhow::{anyhow, Context, Result};
 use futures::SinkExt;
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
@@ -18,29 +16,28 @@ pub async fn send_open(
     rid: u32,
     hold: u16,
     capabilities: Capabilities,
-) -> Result<(), Box<dyn Error>> {
-    let body = bgp::BGPOpenMessage::new(asn, rid, hold, capabilities).unwrap();
-    println!("open :{:?}", body);
+) -> Result<()> {
+    let body = bgp::BGPOpenMessage::new(asn, rid, hold, capabilities)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
     let message: Vec<u8> =
         bgp::Message::new(bgp::MessageType::Open, bgp::BGPMessageBody::Open(body))
-            .unwrap()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
             .into();
-    println!("message :{:?}", message);
-    let r = server.send(message).await;
-    match r {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            println!("{:?}", e);
-            Err(Box::new(e))
-        }
-    }
+
+    server
+        .send(message)
+        .await
+        .context("Failed to send OPEN message")?;
+
+    Ok(())
 }
 
 pub async fn send_update(
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
     neighbor: Arc<Mutex<BGPNeighbor>>,
     nlris: Vec<(Nlri, Option<RouteAttributes>)>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut wd: Vec<Nlri> = vec![];
     let mut updates: HashMap<RouteAttributes, Vec<Nlri>> = HashMap::new();
     for (n, a) in nlris {
@@ -94,8 +91,7 @@ pub async fn send_update(
             match server.send(message).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("{:?}", e);
-                    return Err(Box::new(e));
+                    return Err(anyhow!("Failed to send UPDATE message: {}", e));
                 }
             };
             wd.clear();
@@ -106,7 +102,7 @@ pub async fn send_update(
 
 pub async fn send_keepalive(
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let body = bgp::BGPKeepaliveMessage::new().unwrap();
     let message: Vec<u8> = bgp::Message::new(
         bgp::MessageType::Keepalive,
@@ -115,14 +111,10 @@ pub async fn send_keepalive(
     .unwrap()
     .into();
     println!("FSM KeepaliveTimerExpires: Sending {:?}", body);
-    let r = server.send(message).await;
-    match r {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            println!("{:?}", e);
-            Err(Box::new(e))
-        }
-    }
+    server
+        .send(message)
+        .await
+        .context("Failed to send KEEPALIVE message")
 }
 
 pub async fn read_message(

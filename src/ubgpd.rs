@@ -1,7 +1,8 @@
+use anyhow::{Context, Result};
 use clap::Parser;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::{collections::HashMap, error::Error};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
@@ -24,36 +25,29 @@ struct Opt {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::parse();
-    let mut config = config::read_config(&opt.config)?;
+    let mut config = config::read_config(&opt.config).context(format!(
+        "Failed to read config file {}",
+        opt.config.display()
+    ))?;
 
-    config.hold_time = match config.hold_time {
-        Some(h) => Some(h),
-        None => Some(3),
-    };
+    // Add defaults with proper error handling
+    config.hold_time = config.hold_time.or(Some(3));
+    config.port = config.port.or(Some(179));
 
-    config.port = match config.port {
-        Some(h) => Some(h),
-        None => Some(179),
-    };
+    config.localip = config.localip.or_else(|| {
+        Some("127.0.0.1".parse().expect("Failed to parse default IP")) // Consider handling this error better
+    });
 
-    config.localip = match config.localip {
-        Some(i) => Some(i),
-        None => Some("127.0.0.1".parse().unwrap()),
-    };
-
-    config.families = match config.families {
-        Some(i) => Some(i),
-        None => {
-            let a = bgp::AddressFamily {
-                afi: bgp::Afi::Ipv4,
-                safi: bgp::Safi::NLRIUnicast,
-            };
-            Some(vec![a])
-        }
-    };
+    config.families = config.families.or_else(|| {
+        let a = bgp::AddressFamily {
+            afi: bgp::Afi::Ipv4,
+            safi: bgp::Safi::NLRIUnicast,
+        };
+        Some(vec![a])
+    });
 
     let families = config.families.clone();
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(

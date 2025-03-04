@@ -1,10 +1,10 @@
-use serde_derive::Deserialize;
-use std::error::Error;
+use anyhow::{Context, Result};
 use std::io::prelude::*;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
 use crate::bgp;
+use serde_derive::Deserialize;
 
 /// Configuration for a BGP neighbor.
 #[derive(Deserialize, Debug, Clone)]
@@ -30,16 +30,16 @@ pub struct Config {
     pub neighbors: Option<Vec<Neighbor>>,
 }
 
-pub fn read_config(path: &PathBuf) -> Result<Config, Box<dyn Error>> {
+pub fn read_config(path: &PathBuf) -> Result<Config> {
     let mut f = std::fs::File::open(path)
-        .map_err(|e| format!("Failed to open config file {}: {}", path.display(), e))?;
+        .with_context(|| format!("Failed to open config file {}", path.display()))?;
 
     let mut c = String::new();
     f.read_to_string(&mut c)
-        .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
+        .with_context(|| format!("Failed to read config file {}", path.display()))?;
 
     let config: Config = toml::from_str(&c)
-        .map_err(|e| format!("Failed to parse config file {}: {}", path.display(), e))?;
+        .with_context(|| format!("Failed to parse config file {}", path.display()))?;
 
     Ok(config)
 }
