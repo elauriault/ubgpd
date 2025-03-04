@@ -2,9 +2,10 @@
 //
 // This file contains the main BGPSpeaker struct and its associated types.
 
-use async_std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::bgp;
 use crate::config;

@@ -2,7 +2,8 @@ use ipnet::IpNet;
 use num_traits::FromPrimitive;
 use std::net::IpAddr;
 
-use async_std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tonic::{transport::Server, Request, Response, Status};
 
 use ubgp::config_server::{Config, ConfigServer};

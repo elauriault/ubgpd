@@ -7,9 +7,10 @@ use super::timers;
 use super::types::{BGPState, Event};
 use crate::bgp;
 use crate::speaker;
-use async_std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
 pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
@@ -21,10 +22,7 @@ pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
     println!("FSM init_peer: Idle to Active");
 }
 
-pub async fn connect(
-    speaker: Arc<Mutex<speaker::BGPSpeaker>>,
-    neighbor: Arc<Mutex<BGPNeighbor>>,
-) {
+pub async fn connect(speaker: Arc<Mutex<speaker::BGPSpeaker>>, neighbor: Arc<Mutex<BGPNeighbor>>) {
     let socket;
     {
         let mut n = neighbor.lock().await;
@@ -163,10 +161,7 @@ pub async fn process_event(
     }
 }
 
-pub async fn process_event_idle(
-    e: Event,
-    nb: Arc<Mutex<BGPNeighbor>>,
-) {
+pub async fn process_event_idle(e: Event, nb: Arc<Mutex<BGPNeighbor>>) {
     match e {
         Event::ManualStartWithPassiveTcpEstablishment => {
             println!("FSM IDLE: {:?} to be implemented", e);

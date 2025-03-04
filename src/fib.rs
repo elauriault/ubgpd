@@ -1,8 +1,9 @@
-use async_std::sync::{Arc, Mutex};
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use std::net::IpAddr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 // use netlink_packet::route::RouteProtool;
 // use netlink_packet_route::link::nlas::Nla as lnla;
 use netlink_packet_route::link::LinkAttribute;
@@ -186,7 +187,13 @@ impl Fib {
 
     async fn _del_route(&mut self, entry: FibEntry, handle: Handle) {
         let route = handle.route();
-        route.del(entry.rm).execute().await.unwrap();
+        // route.del(entry.rm).execute().await.unwrap();
+        if let Err(e) = route.del(entry.rm).execute().await {
+            log::error!("Failed to delete route: {}", e);
+            // Handle error without returning - maybe set a state flag or retry
+        } else {
+            log::debug!("Route deleted successfully");
+        }
     }
 
     async fn get_routes(&mut self, af: AddressFamily) -> Vec<FibEntry> {

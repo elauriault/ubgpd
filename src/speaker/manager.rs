@@ -2,7 +2,8 @@
 //
 // This file contains RIB and FIB management functionality.
 
-use async_std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 use crate::bgp::{self};

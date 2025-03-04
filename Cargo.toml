@@ -7,17 +7,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.6.2", features = ["codec"]}
 tokio-stream = "0.1"
 tokio-io = "0.1"
-tokio-test = "*"
+tokio-test = "0.4"
 bytes = "1"
 num-traits = "0.2"
 num-derive = "0.4"
 derive_builder = "^0.9"
 byteorder = "1.4.2"
-async-std = "1"
 futures = "0.3"
 thiserror = "1.0"
 anyhow = "1.0"
@@ -25,19 +24,21 @@ ipnet = "2.0"
 toml = "0.5"
 serde = { version = "1.0" }
 serde_derive = "1.0"
-ipnetwork = "*"
+ipnetwork = "0.21"
 libc = "0.2"
+log = "0.4"
+env_logger = "0.10"
 
 rtnetlink = "0.14"
-netlink-packet = { version = "*", features= ["rtnetlink"]}
-netlink-sys = "*"
+netlink-packet = { version = "0.1", features= ["rtnetlink"]}
+netlink-sys = "0.8"
 netlink-packet-utils = { version = "0.5" }
 netlink-packet-route = { version = "0.19" }
 netlink-packet-core = { version = "0.7" }
 netlink-proto = { default-features = false, version = "0.11" }
 
 clap = { version = "^4", features = ["derive"] }
-itertools = "*"
+itertools = "0.14"
 tonic = "0.10"
 prost = "0.12"
 pretty_assertions = "1.4.0"

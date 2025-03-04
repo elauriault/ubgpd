@@ -6,7 +6,8 @@ use super::types::{BGPState, Event};
 use crate::bgp::{self, AddressFamily, Nlri};
 use crate::rib::{RibUpdate, RouteAttributes};
 use crate::speaker::{self};
-use async_std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub async fn process_message(
     m: bgp::Message,

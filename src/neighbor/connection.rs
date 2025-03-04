@@ -4,10 +4,11 @@ use super::capabilities::Capabilities;
 use super::session::BGPNeighbor;
 use crate::bgp::{self, Message, Nlri};
 use crate::rib::RouteAttributes;
-use async_std::sync::{Arc, Mutex};
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 

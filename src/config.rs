@@ -1,5 +1,8 @@
 use serde_derive::Deserialize;
+use std::error::Error;
+use std::io::prelude::*;
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 
 use crate::bgp;
 
@@ -25,6 +28,20 @@ pub struct Config {
     /// List of neighbors for the router.
     #[serde(default)]
     pub neighbors: Option<Vec<Neighbor>>,
+}
+
+pub fn read_config(path: &PathBuf) -> Result<Config, Box<dyn Error>> {
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open config file {}: {}", path.display(), e))?;
+
+    let mut c = String::new();
+    f.read_to_string(&mut c)
+        .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
+
+    let config: Config = toml::from_str(&c)
+        .map_err(|e| format!("Failed to parse config file {}: {}", path.display(), e))?;
+
+    Ok(config)
 }
 
 fn default_connect_retry() -> Option<u16> {

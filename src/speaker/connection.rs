@@ -2,9 +2,10 @@
 //
 // This file handles connection-related functionality.
 
-use async_std::sync::{Arc, Mutex};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 
 use crate::neighbor;
 
@@ -13,7 +14,7 @@ use super::types::BGPSpeaker;
 /// Add an incoming BGP connection.
 pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
     use crate::neighbor;
-    
+
     println!("A new connection!");
     let n;
     {
@@ -28,7 +29,7 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
         let remote_port = addr.port();
         let hold_time = s.hold_time;
         let connect_retry_time = 120; // This is a default value
-        
+
         {
             let speaker = speaker.lock().await;
             n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
@@ -84,10 +85,7 @@ pub async fn connect_mgr(speaker: Arc<Mutex<BGPSpeaker>>) {
 }
 
 /// Connect to a BGP neighbor.
-pub async fn connect(
-    speaker: Arc<Mutex<BGPSpeaker>>,
-    neighbor: Arc<Mutex<neighbor::BGPNeighbor>>,
-) {
+pub async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<neighbor::BGPNeighbor>>) {
     // Delegating to the neighbor module's connect function
     neighbor::connect(speaker, neighbor).await;
 }

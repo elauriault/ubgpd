@@ -1,8 +1,8 @@
-use async_std::sync::{Arc, Mutex};
 use clap::Parser;
-use std::io::prelude::*;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{collections::HashMap, error::Error};
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 #[macro_use]
@@ -25,11 +25,9 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
     let opt = Opt::parse();
-    let mut f = std::fs::File::open(&opt.config).unwrap();
-    let mut c = String::new();
-    f.read_to_string(&mut c).unwrap();
-    let mut config: config::Config = toml::from_str(&c).unwrap();
+    let mut config = config::read_config(&opt.config)?;
 
     config.hold_time = match config.hold_time {
         Some(h) => Some(h),
