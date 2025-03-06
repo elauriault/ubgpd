@@ -98,6 +98,12 @@ pub struct Mpnlri {
     pub nlris: Vec<Nlri>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mpunlri {
+    pub af: AddressFamily,
+    pub nlris: Vec<Nlri>,
+}
+
 impl Default for Mpnlri {
     fn default() -> Self {
         Mpnlri {
@@ -106,6 +112,18 @@ impl Default for Mpnlri {
                 safi: Safi::NLRIUnicast,
             },
             nh: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+            nlris: vec![],
+        }
+    }
+}
+
+impl Default for Mpunlri {
+    fn default() -> Self {
+        Mpunlri {
+            af: AddressFamily {
+                afi: Afi::Ipv6,
+                safi: Safi::NLRIUnicast,
+            },
             nlris: vec![],
         }
     }
@@ -188,6 +206,56 @@ impl From<Vec<u8>> for Mpnlri {
     }
 }
 
+impl From<Vec<u8>> for Mpunlri {
+    fn from(src: Vec<u8>) -> Self {
+        let mut src = src;
+        let total_len = src.remove(0) as usize;
+
+        let mut afi = [0u8; 2];
+        afi.copy_from_slice(&src[0..2]);
+        let afi = u16::from_be_bytes(afi);
+        let afi: Afi = FromPrimitive::from_u16(afi).unwrap();
+
+        let mut safi = [0u8; 1];
+        safi.copy_from_slice(&src[2..3]);
+        let safi = u8::from_be_bytes(safi);
+        let safi: Safi = FromPrimitive::from_u8(safi).unwrap();
+
+        let mut nlris: Vec<Nlri> = vec![];
+        let mut i = 3;
+        match afi {
+            Afi::Ipv4 => {
+                while i < total_len {
+                    let plen = src[i];
+                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let buf = Ipv4Octets {
+                        octets: src[i..end].to_vec(),
+                    };
+                    let n: Nlri = buf.into();
+                    nlris.push(n);
+                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    i += blen;
+                }
+            }
+            Afi::Ipv6 => {
+                while i < total_len {
+                    let plen = src[i];
+                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let buf = Ipv6Octets {
+                        octets: src[i..end].to_vec(),
+                    };
+                    let n: Nlri = buf.into();
+                    nlris.push(n);
+                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    i += blen;
+                }
+            }
+        }
+        let af = AddressFamily { afi, safi };
+        Mpunlri { af, nlris }
+    }
+}
+
 impl From<Mpnlri> for Vec<u8> {
     fn from(val: Mpnlri) -> Self {
         let mut buf = Cursor::new(vec![]);
@@ -211,6 +279,24 @@ impl From<Mpnlri> for Vec<u8> {
                 blen += 17;
             }
         }
+        for n in val.nlris {
+            let nbuf: Vec<u8> = n.into();
+            blen += nbuf.len();
+            buf.write_all(&nbuf).unwrap();
+        }
+        buf.rewind().unwrap();
+        buf.write_u8(blen as u8).unwrap();
+        buf.into_inner()
+    }
+}
+
+impl From<Mpunlri> for Vec<u8> {
+    fn from(val: Mpunlri) -> Self {
+        let mut buf = Cursor::new(vec![]);
+        let mut blen = 3;
+        buf.write_u8(blen as u8).unwrap();
+        buf.write_u16::<BigEndian>(val.af.afi as u16).unwrap();
+        buf.write_u8(val.af.safi as u8).unwrap();
         for n in val.nlris {
             let nbuf: Vec<u8> = n.into();
             blen += nbuf.len();

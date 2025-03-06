@@ -413,7 +413,7 @@ pub async fn handle_update(
     let mut nlris = vec![];
     let mut withdrawn = vec![];
     let mut nh = None;
-    log::debug!("handle_update {:?}", m);
+    log::info!("handle_update {:?}", m);
     match m
         .path_attributes
         .clone()

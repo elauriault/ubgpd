@@ -110,7 +110,7 @@ pub enum PathAttributeValue {
     Advertiser,
     RcidPathClusterId,
     MPReachableNLRI(Mpnlri),
-    MPUnreachableNLRI(Mpnlri),
+    MPUnreachableNLRI(Mpunlri),
     ExtCommunities,
 }
 
@@ -206,10 +206,10 @@ impl PathAttribute {
         }
     }
 
-    pub fn mp_unreachable(af: AddressFamily, nh: IpAddr, nlris: Vec<Nlri>) -> Self {
+    pub fn mp_unreachable(af: AddressFamily, nlris: Vec<Nlri>) -> Self {
         PathAttribute {
             type_code: PathAttributeType::MPUnreachableNLRI,
-            value: PathAttributeValue::MPUnreachableNLRI(Mpnlri { af, nh, nlris }),
+            value: PathAttributeValue::MPUnreachableNLRI(Mpunlri { af, nlris }),
             optional: true,
             transitive: false,
             partial: false,
