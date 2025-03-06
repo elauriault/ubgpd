@@ -19,7 +19,7 @@ pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
         n.attributes.connect_retry_counter = 0;
         n.attributes.state = BGPState::Active;
     }
-    println!("FSM init_peer: Idle to Active");
+    log::debug!("FSM init_peer: Idle to Active");
 }
 
 pub async fn connect(speaker: Arc<Mutex<speaker::BGPSpeaker>>, neighbor: Arc<Mutex<BGPNeighbor>>) {
@@ -49,7 +49,7 @@ pub async fn fsm_tcp(
     stream: TcpStream,
     speaker: Arc<Mutex<speaker::BGPSpeaker>>,
 ) {
-    println!("starting fsm_tcp for {:?} with {:?}", neighbor, stream);
+    log::debug!("starting fsm_tcp for {:?} with {:?}", neighbor, stream);
 
     let (tx, mut rx) = mpsc::channel::<Event>(100);
 
@@ -91,6 +91,17 @@ pub async fn fsm_tcp(
     loop {
         tokio::select! {
             Some(e) = rx.recv() => {
+                if matches!(e, Event::TcpConnectionFails) {
+                    log::info!("TCP connection termination requested");
+                    let _ = sender.send(());
+                    let _ = tokio::join!(hold_task);
+                    {
+                        let mut n = neighbor.lock().await;
+                        n.attributes.state = BGPState::Idle;
+                        n.tx = None;
+                    }
+                    break;
+                }
                 process_event(e, speaker.clone(), neighbor.clone(), Some(&mut server)).await;
             }
             Some(m) = connection::read_message(&mut server) => {
@@ -131,30 +142,30 @@ pub async fn process_event(
     match server {
         Some(server) => match state {
             BGPState::Active => {
-                println!("FSM ACTIVE: received {:?}", e);
+                log::debug!("FSM ACTIVE: received {:?}", e);
                 process_event_active(e, s, nb, server).await;
             }
             BGPState::Connect => {
-                println!("FSM CONNECT: received {:?}", e);
+                log::debug!("FSM CONNECT: received {:?}", e);
                 process_event_connect(e, s, nb, server).await;
             }
             BGPState::OpenConfirm => {
-                println!("FSM OPENCONFIRM: received {:?}", e);
+                log::debug!("FSM OPENCONFIRM: received {:?}", e);
                 process_event_openconfirm(e, s, nb, server).await;
             }
             BGPState::OpenSent => {
-                println!("FSM OPENSENT: received {:?}", e);
+                log::debug!("FSM OPENSENT: received {:?}", e);
                 process_event_opensent(e, nb, server).await;
             }
             BGPState::Established => {
-                println!("FSM ESTABLISHED: received {:?}", e);
+                log::debug!("FSM ESTABLISHED: received {:?}", e);
                 process_event_established(e, nb, server).await;
             }
             _ => {}
         },
         None => {
             if let BGPState::Idle = state {
-                println!("FSM IDLE: received {:?}", e);
+                log::debug!("FSM IDLE: received {:?}", e);
                 process_event_idle(e, nb).await;
             }
         }
@@ -164,19 +175,19 @@ pub async fn process_event(
 pub async fn process_event_idle(e: Event, nb: Arc<Mutex<BGPNeighbor>>) {
     match e {
         Event::ManualStartWithPassiveTcpEstablishment => {
-            println!("FSM IDLE: {:?} to be implemented", e);
+            log::debug!("FSM IDLE: {:?} to be implemented", e);
         }
         Event::AutomaticStartWithPassiveTcpEstablishment => {
-            println!("FSM IDLE: {:?} to be implemented", e);
+            log::debug!("FSM IDLE: {:?} to be implemented", e);
         }
         Event::ManualStart => {
-            println!("FSM IDLE: {:?} to be implemented", e);
+            log::debug!("FSM IDLE: {:?} to be implemented", e);
         }
         Event::AutomaticStart => {
             init_peer(nb).await;
         }
         _ => {
-            println!("{:?}", e);
+            log::debug!("{:?}", e);
         }
     }
 }
@@ -219,10 +230,10 @@ pub async fn process_event_connect(
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::OpenSent;
             }
-            println!("FSM: Connect to OpenSent");
+            log::debug!("FSM Connect to OpenSent");
         }
         _ => {
-            println!("FSM CONNECT: {:?} looks like an error", e);
+            log::debug!("FSM CONNECT: {:?} looks like an error", e);
         }
     }
 }
@@ -235,16 +246,16 @@ pub async fn process_event_active(
 ) {
     match e {
         Event::ManualStop => {
-            println!("FSM ACTIVE: {:?} to be implemented", e);
+            log::debug!("FSM ACTIVE: {:?} to be implemented", e);
         }
         Event::ConnectRetryTimerExpires => {
-            println!("FSM ACTIVE: {:?} to be implemented", e);
+            log::debug!("FSM ACTIVE: {:?} to be implemented", e);
         }
         Event::DelayOpenTimerExpires => {
-            println!("FSM ACTIVE: {:?} to be implemented", e);
+            log::debug!("FSM ACTIVE: {:?} to be implemented", e);
         }
         Event::TcpConnectionFails => {
-            println!("FSM ACTIVE: {:?} to be implemented", e);
+            log::debug!("FSM ACTIVE: {:?} to be implemented", e);
         }
         Event::TcpConnectionConfirmed => {
             let asn;
@@ -268,13 +279,13 @@ pub async fn process_event_active(
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::OpenSent;
             }
-            println!("FSM: Active to OpenSent");
+            log::debug!("FSM Active to OpenSent");
         }
         Event::NotifMsg => {
-            println!("FSM ACTIVE: {:?} to be implemented", e);
+            log::debug!("FSM ACTIVE: {:?} to be implemented", e);
         }
         _ => {
-            println!("FSM: Looks {:?} like an error", e);
+            log::debug!("FSM Looks {:?} like an error", e);
         }
     }
 }
@@ -286,28 +297,28 @@ pub async fn process_event_opensent(
 ) {
     match e {
         Event::HoldTimerExpires => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::ManualStop => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::AutomaticStop => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::TcpConnectionValid => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::TcpConnectionConfirmed => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::TcpConnectionFails => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         Event::NotifMsg => {
-            println!("FSM OPENSENT: {:?} to be implemented", e);
+            log::debug!("FSM OPENSENT: {:?} to be implemented", e);
         }
         _ => {
-            println!("FSM OPENSENT: {:?} looks like an error", e);
+            log::debug!("FSM OPENSENT: {:?} looks like an error", e);
         }
     }
 }
@@ -323,10 +334,10 @@ pub async fn process_event_openconfirm(
             connection::send_keepalive(server).await.unwrap();
         }
         Event::TcpConnectionFails => {
-            println!("FSM OPENCONFIRM: {:?} to be implemented", e);
+            log::debug!("FSM OPENCONFIRM: {:?} to be implemented", e);
         }
         Event::NotifMsg => {
-            println!("FSM OPENCONFIRM: {:?} to be implemented", e);
+            log::debug!("FSM OPENCONFIRM: {:?} to be implemented", e);
         }
         Event::BGPOpen => {
             let asn;
@@ -348,7 +359,7 @@ pub async fn process_event_openconfirm(
                 .unwrap();
         }
         _ => {
-            println!("FSM OPENCONFIRM: {:?} looks like an error", e);
+            log::debug!("FSM OPENCONFIRM: {:?} looks like an error", e);
         }
     }
 }
@@ -360,22 +371,22 @@ pub async fn process_event_established(
 ) {
     match e {
         Event::HoldTimerExpires => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::AutomaticStop => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::ManualStop => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::TcpConnectionFails => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::TcpConnectionValid => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::NotifMsg => {
-            println!("FSM ESTABLISHED: {:?} to be implemented", e);
+            log::info!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::KeepaliveTimerExpires => {
             connection::send_keepalive(server).await.unwrap();
@@ -384,7 +395,7 @@ pub async fn process_event_established(
             let _ = connection::send_update(server, nb.clone(), nlris).await;
         }
         _ => {
-            println!("FSM ESTABLISHED: {:?} looks like an error", e);
+            log::debug!("FSM ESTABLISHED: {:?} looks like an error", e);
         }
     }
 }

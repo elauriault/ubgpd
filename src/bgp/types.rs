@@ -42,7 +42,7 @@ pub enum MessageType {
 #[derive(Debug, Clone, FromPrimitive)]
 #[repr(u8)]
 pub enum ErrorCode {
-    MessageHeader,
+    MessageHeader = 1,
     OpenMessage,
     UpdateMessage,
     HoldTimerExpired,

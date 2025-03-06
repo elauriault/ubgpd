@@ -80,8 +80,30 @@ async fn loc_rib_withdraw(
 ) -> Vec<(bgp::Nlri, Option<rib::RouteAttributes>)> {
     let mut modified = vec![];
     let mut rib = rib.lock().await;
+    let mut to_withdraw: Vec<bgp::Nlri> = vec![];
+    if routes.nlris.is_empty() {
+        let peer_rid = routes.attributes.peer_rid;
+        log::info!("Withdrawing all routes from peer RID {}", peer_rid);
+        to_withdraw = rib
+            .iter()
+            .filter_map(|(prefix, attrs)| {
+                if attrs.iter().any(|attr| attr.peer_rid == peer_rid) {
+                    Some(*prefix)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        log::info!(
+            "Found {} prefixes affected by peer {} disconnection",
+            to_withdraw.len(),
+            peer_rid
+        );
+    } else {
+        to_withdraw = routes.nlris;
+    }
 
-    for nlri in routes.nlris {
+    for nlri in to_withdraw {
         match rib.get_mut(&nlri) {
             None => {}
             Some(all_attributes) => {
@@ -117,25 +139,30 @@ pub async fn rib_mgr(
 ) {
     loop {
         let e = rx.recv().await.unwrap();
-        println!("Rib Manager got {:?}", e);
+        log::debug!("Rib Manager got {:?}", e);
 
         match e {
             RibEvent::UpdateRoutes(msg) => {
                 let mut modified = vec![];
 
                 if let Some(routes) = msg.added {
-                    println!("Adding routes {:?} from {:?}", routes, msg.rid);
+                    log::debug!("Adding routes {:?} from {:?}", routes, msg.rid);
                     let mut added =
                         loc_rib_added(rib.clone(), fib.clone(), asn, routes.clone()).await;
                     modified.append(&mut added);
                 }
 
                 if let Some(routes) = msg.withdrawn {
-                    println!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
+                    log::info!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
                     let mut withdraw =
                         loc_rib_withdraw(rib.clone(), fib.clone(), routes.clone()).await;
                     modified.append(&mut withdraw);
                 }
+
+                log::info!(
+                    "The following have modified best route and need to be propagated {:?}",
+                    modified
+                );
 
                 if !modified.is_empty() {
                     let _ = tx.send(FibEvent::RibUpdated).await;
@@ -160,13 +187,13 @@ pub async fn fib_mgr(
     rib: Arc<Mutex<rib::Rib>>,
     mut rx: tokio::sync::mpsc::Receiver<FibEvent>,
 ) {
-    println!("starting fib manager");
+    log::debug!("starting fib manager");
 
     loop {
         let e = rx.recv().await.unwrap();
         match e {
             FibEvent::RibUpdated => {
-                println!("Fib Manager : Got {:?}", e);
+                log::debug!("Fib Manager : Got {:?}", e);
                 let mut fib = fib.lock().await;
                 fib.refresh().await;
                 fib.sync(rib.clone()).await;

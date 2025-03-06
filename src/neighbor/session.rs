@@ -105,7 +105,7 @@ impl BGPNeighbor {
     }
 
     pub async fn adjrib_add(&mut self, af: AddressFamily, routes: RibUpdate) {
-        println!("Adding routes to ajdrib {:?} : {:?}", af, routes);
+        log::debug!("Adding routes to ajdrib {:?} : {:?}", af, routes);
         match self.adjrib.get_mut(&af) {
             None => {
                 let mut rib = rib::Rib::default();
@@ -131,7 +131,7 @@ impl BGPNeighbor {
     }
 
     pub async fn adjrib_withdraw(&mut self, af: AddressFamily, routes: RibUpdate) {
-        println!("Removing routes from adjrib {:?} : {:?}", af, routes);
+        log::debug!("Removing routes from adjrib {:?} : {:?}", af, routes);
         match self.adjrib.get_mut(&af) {
             None => {}
             Some(rib) => {
