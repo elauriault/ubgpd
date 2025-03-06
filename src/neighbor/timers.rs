@@ -21,13 +21,22 @@ pub async fn timer_hold(
             s = n.attributes.hold_time;
             tx = n.tx.clone();
         }
-        let tx = tx.unwrap();
+        let tx = match tx {
+            Some(tx) => tx,
+            None => {
+                log::error!("Timer channel not available for neighbor");
+                break; // Exit the timer loop if channel is gone
+            }
+        };
         sleep(Duration::from_secs(s as u64 / 3)).await;
         if receiver.try_recv().is_ok() {
             log::debug!("Exiting hold timer");
             break;
         }
-        tx.send(Event::KeepaliveTimerExpires).await.unwrap();
+        if let Err(e) = tx.send(Event::KeepaliveTimerExpires).await {
+            log::error!("Failed to send KeepaliveTimerExpires event: {}", e);
+            break; // Exit loop if send fails
+        }
     }
 }
 
@@ -51,7 +60,10 @@ pub async fn timer_keepalive(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>
         }
         log::debug!("FSM TimerKeepalive incremented");
         if k > h {
-            tx.send(Event::KeepaliveTimerExpires).await.unwrap()
+            if let Err(e) = tx.send(Event::KeepaliveTimerExpires).await {
+                log::error!("Failed to send KeepaliveTimerExpires event: {}", e);
+                break; // Exit loop if send fails
+            }
         }
     }
     log::info!("TimerKeepalive thread terminated");

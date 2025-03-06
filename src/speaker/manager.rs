@@ -94,7 +94,7 @@ async fn loc_rib_withdraw(
                 }
             })
             .collect();
-        log::info!(
+        log::debug!(
             "Found {} prefixes affected by peer {} disconnection",
             to_withdraw.len(),
             peer_rid
@@ -153,13 +153,12 @@ pub async fn rib_mgr(
                 }
 
                 if let Some(routes) = msg.withdrawn {
-                    log::info!("Withdrawing routes {:?} from {:?}", routes, msg.rid);
                     let mut withdraw =
                         loc_rib_withdraw(rib.clone(), fib.clone(), routes.clone()).await;
                     modified.append(&mut withdraw);
                 }
 
-                log::info!(
+                log::debug!(
                     "The following have modified best route and need to be propagated {:?}",
                     modified
                 );
