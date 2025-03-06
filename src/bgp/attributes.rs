@@ -263,7 +263,8 @@ impl From<Vec<u8>> for PathAttribute {
                     let path_type: ASPATHSegmentType =
                         FromPrimitive::from_u8(src[i + offset]).unwrap();
                     let as_list_len = src[i + offset + 1] as usize;
-                    let mut as_list = Box::<Vec<u16>>::new(vec![]);
+                    // let mut as_list = Box::<Vec<u16>>::new(vec![]);
+                    let mut as_list = vec![];
 
                     for x in 0..as_list_len {
                         let j = i + offset + 2 + x * 2;
@@ -273,7 +274,7 @@ impl From<Vec<u8>> for PathAttribute {
                         as_list.push(asn);
                     }
 
-                    let as_list = Box::leak(as_list).to_vec();
+                    // let as_list = Box::leak(as_list).to_vec();
                     let asg = ASPATHSegment { path_type, as_list };
 
                     asp.push(asg);

@@ -3,7 +3,7 @@
 use crate::bgp::{self};
 use crate::rib;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BGPState {
     Idle,
     Connect,

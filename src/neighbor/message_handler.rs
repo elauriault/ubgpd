@@ -6,8 +6,12 @@ use super::types::{BGPState, Event};
 use crate::bgp::{self, AddressFamily, Nlri};
 use crate::rib::{RibUpdate, RouteAttributes};
 use crate::speaker::{self};
+use log::log;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+use crate::rib;
 
 pub async fn process_message(
     m: bgp::Message,
@@ -21,27 +25,27 @@ pub async fn process_message(
     }
     match state {
         BGPState::Active => {
-            println!("FSM ACTIVE: received {:?}", m.body);
+            log::debug!("FSM ACTIVE: received {:?}", m.body);
             process_message_active(m, s, nb).await;
         }
         BGPState::Connect => {
-            println!("FSM CONNECT: received {:?}", m.body);
+            log::debug!("FSM CONNECT: received {:?}", m.body);
             process_message_connect(m, nb).await;
         }
         BGPState::OpenConfirm => {
-            println!("FSM OPENCONFIRM: received {:?}", m.body);
+            log::debug!("FSM OPENCONFIRM: received {:?}", m.body);
             process_message_openconfirm(m, s, nb).await;
         }
         BGPState::OpenSent => {
-            println!("FSM OPENSENT: received {:?}", m.body);
+            log::debug!("FSM OPENSENT: received {:?}", m.body);
             process_message_opensent(m, s, nb).await;
         }
         BGPState::Established => {
-            println!("FSM ESTABLISHED: received {:?}", m.body);
+            log::debug!("FSM ESTABLISHED: received {:?}", m.body);
             process_message_established(m, s, nb).await;
         }
         BGPState::Idle => {
-            println!("FSM IDLE: received {:?}", m.body);
+            log::debug!("FSM IDLE: received {:?}", m.body);
             process_message_idle(m, nb).await;
         }
     }
@@ -57,7 +61,7 @@ pub async fn process_message_opensent(
             handle_keepalive(nb).await;
         }
         bgp::BGPMessageBody::Open(body) => {
-            println!("FSM OPENSENT: Open {}", body);
+            log::debug!("FSM OPENSENT: Open {}", body);
             let tx;
             {
                 let n = nb.lock().await;
@@ -81,17 +85,17 @@ pub async fn process_message_opensent(
                         tokio::spawn(async {
                             timers::timer_keepalive(nb, ta).await;
                         });
-                        println!("FSM OPENSENT: OpenSent to OpenConfirm");
+                        log::debug!("FSM OPENSENT: OpenSent to OpenConfirm");
                         // tx.send(Event::BGPOpen).await.unwrap();
                     }
                 },
             }
         }
         bgp::BGPMessageBody::Notification(_body) => {
-            println!("FSM OPENSENT: Notification unimplemented");
+            log::debug!("FSM OPENSENT: Notification unimplemented");
         }
         _ => {
-            println!("FSM OPENSENT: Unimplemented");
+            log::debug!("FSM OPENSENT: Unimplemented");
             let tx;
             {
                 let n = nb.lock().await;
@@ -109,7 +113,7 @@ pub async fn process_message_active(
 ) {
     match m.body {
         bgp::BGPMessageBody::Open(body) => {
-            println!("FSM ACTIVE: Open {}", body);
+            log::debug!("FSM ACTIVE: Open {}", body);
             let tx;
             {
                 let n = nb.lock().await;
@@ -133,7 +137,7 @@ pub async fn process_message_active(
                         tokio::spawn(async {
                             timers::timer_keepalive(nb, ta).await;
                         });
-                        println!("FSM ACTIVE: Active to OpenConfirm");
+                        log::debug!("FSM ACTIVE: Active to OpenConfirm");
                         tx.send(Event::BGPOpen).await.unwrap();
                     }
                 },
@@ -148,14 +152,14 @@ pub async fn process_message_active(
             tx.send(Event::NotifMsg).await.unwrap();
         }
         _ => {
-            println!("Unimplemented");
+            log::debug!("Unimplemented");
         }
     };
 }
 
 pub async fn process_message_connect(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
     {
-        println!("FSM: Shouldn't receive messages in Connect state");
+        log::debug!("FSM Shouldn't receive messages in Connect state");
     };
 }
 
@@ -170,9 +174,10 @@ pub async fn process_message_openconfirm(
             {
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::Established;
+                log::info!("Established BGP neigborship with {}", n.remote_ip.unwrap());
                 send_locrib(s.clone(), n.clone()).await;
             }
-            println!("FSM: OpenConfirm to Established");
+            log::debug!("FSM OpenConfirm to Established");
         }
         bgp::BGPMessageBody::Notification(_body) => {
             let tx;
@@ -183,7 +188,7 @@ pub async fn process_message_openconfirm(
             tx.send(Event::NotifMsg).await.unwrap();
         }
         _ => {
-            println!("Unimplemented");
+            log::debug!("Unimplemented");
         }
     };
 }
@@ -197,27 +202,118 @@ pub async fn process_message_established(
         bgp::BGPMessageBody::Keepalive(_body) => {
             handle_keepalive(nb).await;
         }
-        bgp::BGPMessageBody::Notification(_body) => {
-            let tx;
-            {
-                let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
-            }
-            tx.send(Event::NotifMsg).await.unwrap();
+        bgp::BGPMessageBody::Notification(body) => {
+            handle_notification(body, s, nb).await;
         }
         bgp::BGPMessageBody::Update(body) => {
             handle_update(body, s, nb).await;
         }
         _ => {
-            println!("Unimplemented");
+            log::debug!("Unimplemented");
         }
     };
 }
 
 pub async fn process_message_idle(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
     {
-        println!("Unimplemented");
+        log::debug!("Unimplemented");
     };
+}
+
+pub async fn handle_notification(
+    m: bgp::BGPNotificationMessage,
+    s: Arc<Mutex<speaker::BGPSpeaker>>,
+    nb: Arc<Mutex<BGPNeighbor>>,
+) {
+    log::warn!(
+        "Received NOTIFICATION message: Error Code: {:?}, Subcode: {}",
+        m.error_code,
+        m.error_subcode
+    );
+
+    // Get the neighbor's remote router ID and configured address families before lock contention
+    let remote_rid;
+    let remote_ip;
+    let supported_families;
+    {
+        let n = nb.lock().await;
+        remote_rid = n.remote_rid.unwrap_or(0);
+        remote_ip = n
+            .remote_ip
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)));
+        supported_families = n
+            .capabilities_advertised
+            .multiprotocol
+            .clone()
+            .unwrap_or_else(|| {
+                vec![bgp::AddressFamily {
+                    afi: bgp::Afi::Ipv4,
+                    safi: bgp::Safi::NLRIUnicast,
+                }]
+            });
+    }
+
+    log::warn!(
+        "Closing BGP session with {} (RID: {}) due to NOTIFICATION: {:?}",
+        remote_ip,
+        remote_rid,
+        m.error_code
+    );
+
+    // Withdraw routes learned from this neighbor from the RIB
+    withdraw_neighbor_routes(s.clone(), remote_rid, remote_ip, supported_families).await;
+
+    {
+        let mut n = nb.lock().await;
+        n.attributes.state = BGPState::Idle;
+        n.adjrib.clear();
+        log::info!("Transitioned neighbor {} to IDLE state", remote_ip);
+    }
+
+    // Signal connection termination via Event channel
+    if let Some(tx) = nb.lock().await.tx.clone() {
+        if let Err(e) = tx.send(Event::TcpConnectionFails).await {
+            log::error!("Failed to send TcpConnectionFails event: {}", e);
+        }
+    }
+}
+
+// Helper function to withdraw all routes learned from this neighbor
+async fn withdraw_neighbor_routes(
+    s: Arc<Mutex<speaker::BGPSpeaker>>,
+    remote_rid: u32,
+    remote_ip: IpAddr,
+    families: Vec<bgp::AddressFamily>,
+) {
+    let speaker = s.lock().await;
+
+    for af in families {
+        if let Some(rib_tx) = speaker.ribtx.get(&af) {
+            // Create empty withdrawals for all routes from this neighbor
+            let mut attr = rib::RouteAttributes::default();
+            attr.peer_rid = remote_rid;
+            let mut msg = speaker::Update {
+                added: None,
+                withdrawn: Some(rib::RibUpdate {
+                    nlris: vec![], // Will be populated by RIB manager
+                    attributes: attr,
+                }),
+                rid: remote_rid,
+            };
+
+            log::info!(
+                "Withdrawing all routes for AF {:?}/{:?} from peer {}",
+                af.afi,
+                af.safi,
+                remote_ip
+            );
+
+            // Send withdraw message to RIB manager
+            if let Err(e) = rib_tx.send(speaker::RibEvent::UpdateRoutes(msg)).await {
+                log::error!("Failed to send withdrawal message: {}", e);
+            }
+        }
+    }
 }
 
 pub async fn handle_keepalive(nb: Arc<Mutex<BGPNeighbor>>) {
@@ -233,7 +329,7 @@ pub async fn collision_detection(
     let ns = s.neighbors.clone();
     for n in ns {
         let n = n.lock().await;
-        println!("Checking collision for {:?}", n);
+        log::debug!("Checking collision for {:?}", n);
         let tx = n.tx.clone();
         match tx {
             None => {}
@@ -267,7 +363,7 @@ pub async fn validate_open(
 ) -> bool {
     let n = neighbor.lock().await;
     if n.remote_asn != Some(message.asn) {
-        println!(
+        log::debug!(
             "n.remote_asn: {} != message.asn:{}",
             n.remote_asn.unwrap(),
             message.asn
@@ -284,7 +380,7 @@ pub async fn update_from_open(message: bgp::BGPOpenMessage, neighbor: Arc<Mutex<
     n.attributes.state = BGPState::OpenConfirm;
     let caps: bgp::BGPCapabilities = message.opt_params.into();
     n.capabilities_received = caps.into();
-    println!("Neighbor updated from Open : {:?}", n);
+    log::debug!("Neighbor updated from Open : {:?}", n);
 }
 
 pub async fn send_locrib(s: Arc<Mutex<speaker::BGPSpeaker>>, nb: BGPNeighbor) {
@@ -317,7 +413,7 @@ pub async fn handle_update(
     let mut nlris = vec![];
     let mut withdrawn = vec![];
     let mut nh = None;
-    println!("handle_update {:?}", m);
+    log::debug!("handle_update {:?}", m);
     match m
         .path_attributes
         .clone()

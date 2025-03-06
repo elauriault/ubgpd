@@ -34,7 +34,7 @@ impl Config for GrpcServer {
         &self,
         request: Request<NeighborRequest>,
     ) -> Result<Response<NeighborReply>, Status> {
-        println!("Got a neighbor request: {:?}", request);
+        log::debug!("Got a neighbor request: {:?}", request);
 
         let mut entries = vec![];
         let neighbors;
@@ -82,7 +82,7 @@ impl Config for GrpcServer {
 #[tonic::async_trait]
 impl State for GrpcServer {
     async fn get_rib(&self, request: Request<RibRequest>) -> Result<Response<RibReply>, Status> {
-        println!("Got a rib request: {:?}", request);
+        log::debug!("Got a rib request: {:?}", request);
 
         let mut entries = vec![];
 

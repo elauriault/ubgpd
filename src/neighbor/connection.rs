@@ -61,7 +61,9 @@ pub async fn send_update(
         }
     }
     if !updates.is_empty() || !wd.is_empty() {
-        for (mut ra, routes) in updates {
+        let mut nlris = vec![];
+        let mut attributes = vec![];
+        for (mut ra, mut routes) in updates {
             {
                 let neighbor = neighbor.lock().await;
                 let local_asn = neighbor.local_asn;
@@ -74,28 +76,31 @@ pub async fn send_update(
                     break;
                 }
             }
-            let pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
+            let mut pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
                 .into_iter()
                 .filter(|x| x.is_transitive())
                 .collect::<Vec<bgp::PathAttribute>>();
-            let body = bgp::BGPUpdateMessageBuilder::default()
-                .withdrawn_routes(wd.clone())
-                .path_attributes(pa)
-                .nlri(routes)
-                .build()
-                .unwrap();
-            let message: Vec<u8> =
-                Message::new(bgp::MessageType::Update, bgp::BGPMessageBody::Update(body))
-                    .unwrap()
-                    .into();
-            match server.send(message).await {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(anyhow!("Failed to send UPDATE message: {}", e));
-                }
-            };
-            wd.clear();
+            attributes.append(&mut pa);
+            nlris.append(&mut routes);
         }
+        let body = bgp::BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(wd.clone())
+            .path_attributes(attributes)
+            .nlri(nlris)
+            .build()
+            .unwrap();
+        log::info!("Sending UPDATE {:?}", body);
+        let message: Vec<u8> =
+            Message::new(bgp::MessageType::Update, bgp::BGPMessageBody::Update(body))
+                .unwrap()
+                .into();
+        match server.send(message).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(anyhow!("Failed to send UPDATE message: {}", e));
+            }
+        };
+        wd.clear();
     }
     Ok(())
 }
@@ -110,7 +115,7 @@ pub async fn send_keepalive(
     )
     .unwrap()
     .into();
-    println!("FSM KeepaliveTimerExpires: Sending {:?}", body);
+    log::debug!("FSM KeepaliveTimerExpires: Sending {:?}", body);
     server
         .send(message)
         .await

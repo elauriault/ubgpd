@@ -16,7 +16,7 @@ use super::types::BGPSpeaker;
 pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
     use crate::neighbor;
 
-    println!("A new connection!");
+    log::info!("A new connection!");
     let n;
     {
         let mut s = speaker.lock().await;
@@ -54,7 +54,7 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
 }
 
 /// Listen for incoming BGP connections.
-pub async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
+pub async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) -> Result<()> {
     let local_ip;
     let local_port;
     {
@@ -64,10 +64,15 @@ pub async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) {
     }
 
     let socket_addr = format!("{}:{}", local_ip, local_port);
-    let listener = TcpListener::bind(&socket_addr).await.unwrap();
+    let listener = TcpListener::bind(&socket_addr)
+        .await
+        .context(format!("Failed to bind BGP listener to {}", socket_addr))?;
 
     loop {
-        let (socket, addr) = listener.accept().await.unwrap();
+        let (socket, addr) = listener
+            .accept()
+            .await
+            .context(format!("Failed to accept BGP connection"))?;
         add_incoming(speaker.clone(), socket, addr).await;
     }
 }

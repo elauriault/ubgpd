@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::IpAddr;
-// use std::net::Ipv4Addr;
+use std::net::Ipv4Addr;
 use std::time::Instant;
 
 use crate::bgp::Flatten;
@@ -33,6 +33,23 @@ pub struct RouteAttributes {
 pub struct RibUpdate {
     pub nlris: Vec<bgp::Nlri>,
     pub attributes: RouteAttributes,
+}
+
+impl Default for RouteAttributes {
+    fn default() -> Self {
+        RouteAttributes {
+            as_path: Vec::new(),                             // Empty AS path
+            origin: bgp::OriginType::Igp,                    // Default origin is IGP
+            next_hop: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), // Default next-hop is 0.0.0.0
+            local_pref: None,                                // No local preference by default
+            multi_exit_disc: None,                           // No MED by default
+            path_type: PathType::External,                   // Default path type is External
+            peer_type: PeeringType::Ebgp,                    // Default peer type is EBGP
+            recv_time: Instant::now(),                       // Current time as receive time
+            peer_rid: 0,                                     // Default router ID is 0
+            peer_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),  // Default peer IP is 0.0.0.0
+        }
+    }
 }
 
 impl RouteAttributes {
@@ -75,7 +92,7 @@ impl RouteAttributes {
     ) -> RouteAttributes {
         let mut multi_exit_disc = None;
         let mut local_pref = None;
-        let mut next_hop = None;
+        let mut next_hop = Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
         let mut as_path: Vec<bgp::ASPATHSegment> = vec![];
         let mut origin = bgp::OriginType::Igp;
         for p in src {

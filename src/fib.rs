@@ -107,16 +107,16 @@ impl Fib {
             let rib = rib.lock().await;
             for (n, a) in rib.iter() {
                 if let Some(a) = a.iter().find(|a| self.has_route(a.next_hop)) {
-                    println!("{:?} : {:?}", n, a);
+                    log::debug!("{:?} : {:?}", n, a);
                     match self
                         .find_route((*n).into(), a.next_hop, handle.clone())
                         .await
                     {
                         Some(_t) => {
-                            println!("Route {:?} already present, skipping it", n);
+                            log::debug!("Route {:?} already present, skipping it", n);
                         }
                         None => {
-                            println!("Route {:?}  is not present, adding it", n);
+                            log::debug!("Route {:?}  is not present, adding it", n);
                             self.add_route(n.into(), a.next_hop, handle.clone()).await;
                         }
                     }
