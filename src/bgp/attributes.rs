@@ -24,13 +24,13 @@ pub enum ASPATHSegmentType {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ASPATHSegment {
-    pub path_type: ASPATHSegmentType,
+    pub segment_type: ASPATHSegmentType,
     pub as_list: Vec<u16>,
 }
 
 impl ASPATHSegment {
     pub fn len(&self) -> usize {
-        match &self.path_type {
+        match &self.segment_type {
             ASPATHSegmentType::AsSequence => self.as_list.len(),
             ASPATHSegmentType::AsSet => 1,
         }
@@ -40,7 +40,7 @@ impl ASPATHSegment {
 impl From<ASPATHSegment> for Vec<u8> {
     fn from(val: ASPATHSegment) -> Self {
         let mut v: Vec<u8> = vec![];
-        v.push(val.path_type as u8);
+        v.push(val.segment_type as u8);
         v.push(val.as_list.len() as u8);
         let mut buf = Cursor::new(vec![]);
         for asn in val.as_list {
@@ -260,7 +260,7 @@ impl From<Vec<u8>> for PathAttribute {
                 let mut offset = 0;
 
                 while total_len > 0 {
-                    let path_type: ASPATHSegmentType =
+                    let segment_type: ASPATHSegmentType =
                         FromPrimitive::from_u8(src[i + offset]).unwrap();
                     let as_list_len = src[i + offset + 1] as usize;
                     // let mut as_list = Box::<Vec<u16>>::new(vec![]);
@@ -275,7 +275,10 @@ impl From<Vec<u8>> for PathAttribute {
                     }
 
                     // let as_list = Box::leak(as_list).to_vec();
-                    let asg = ASPATHSegment { path_type, as_list };
+                    let asg = ASPATHSegment {
+                        segment_type,
+                        as_list,
+                    };
 
                     asp.push(asg);
 

@@ -34,11 +34,15 @@ async fn main() -> Result<()> {
     ))?;
 
     // Add defaults with proper error handling
-    config.hold_time = config.hold_time.or(Some(3));
-    config.port = config.port.or(Some(179));
+    config.hold_time = config.hold_time.or(Some(config::BGP_DEFAULT_HOLD_TIME));
+    config.port = config.port.or(Some(config::BGP_DEFAULT_PORT));
 
     config.localip = config.localip.or_else(|| {
-        Some("127.0.0.1".parse().expect("Failed to parse default IP")) // Consider handling this error better
+        Some(
+            config::BGP_DEFAULT_LOCAL_IP
+                .parse()
+                .expect("Failed to parse default IP"),
+        ) // Consider handling this error better
     });
 
     config.families = config.families.or_else(|| {

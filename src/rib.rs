@@ -55,7 +55,7 @@ impl Default for RouteAttributes {
 impl RouteAttributes {
     pub fn prepend(&mut self, asn: u16, times: u8) -> bgp::Aspath {
         let sequence = bgp::ASPATHSegment {
-            path_type: bgp::ASPATHSegmentType::AsSequence,
+            segment_type: bgp::ASPATHSegmentType::AsSequence,
             as_list: vec![asn; times.into()],
         };
         self.as_path.insert(0, sequence);
@@ -143,6 +143,9 @@ impl RouteAttributes {
             peer_type = PeeringType::Ebgp;
             path_type = PathType::External;
         }
+
+        // This is not the right way toi determine path_type. We should only set to internal if the
+        // route is locally generated bu the router
 
         RouteAttributes {
             next_hop,
@@ -232,6 +235,8 @@ impl Ord for RouteAttributes {
             return lp;
         }
 
+        // If a path was created locally such as network or aggregate, it is preferred over a path learned via BGP.
+
         let pt = self.path_type.cmp(&other.path_type);
         if pt != Ordering::Equal {
             return pt;
@@ -239,7 +244,7 @@ impl Ord for RouteAttributes {
 
         let slen: usize = self.as_path.iter().map(|x| x.len()).sum();
         let olen: usize = other.as_path.iter().map(|x| x.len()).sum();
-        let path_len = slen.cmp(&olen);
+        let path_len = slen.cmp(&olen).reverse();
         if path_len != Ordering::Equal {
             return path_len;
         }
