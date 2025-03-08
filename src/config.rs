@@ -5,6 +5,10 @@ use std::path::PathBuf;
 
 use crate::bgp;
 use serde_derive::Deserialize;
+
+pub const BGP_DEFAULT_PORT: u16 = 179;
+pub const BGP_DEFAULT_HOLD_TIME: u16 = 3;
+pub const BGP_DEFAULT_LOCAL_IP: &str = "127.0.0.1";
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub asn: u16,
