@@ -2,6 +2,7 @@
 
 use super::session::BGPNeighbor;
 use super::types::Event;
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -12,59 +13,56 @@ use crate::neighbor::BGPState;
 pub async fn timer_hold(
     n: Arc<Mutex<BGPNeighbor>>,
     mut receiver: tokio::sync::oneshot::Receiver<()>,
-) {
+) -> Result<()> {
     loop {
-        let s;
-        let tx;
-        {
+        let (hold_time, tx) = {
             let n = n.lock().await;
-            s = n.attributes.hold_time;
-            tx = n.tx.clone();
-        }
-        let tx = match tx {
-            Some(tx) => tx,
-            None => {
-                log::error!("Timer channel not available for neighbor");
-                break; // Exit the timer loop if channel is gone
-            }
+            (n.attributes.hold_time, n.tx.clone())
         };
-        sleep(Duration::from_secs(s as u64 / 3)).await;
-        if receiver.try_recv().is_ok() {
-            log::debug!("Exiting hold timer");
-            break;
-        }
-        if let Err(e) = tx.send(Event::KeepaliveTimerExpires).await {
-            log::error!("Failed to send KeepaliveTimerExpires event: {}", e);
-            break; // Exit loop if send fails
+
+        let tx = tx.ok_or_else(|| anyhow!("Timer channel not available for neighbor"))?;
+
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(hold_time as u64 / 3)) => {
+                tx.send(Event::KeepaliveTimerExpires)
+                    .await
+                    .context("Failed to send KeepaliveTimerExpires event")?;
+            }
+            _ = &mut receiver => {
+                log::debug!("Exiting hold timer");
+                return Ok(());
+            }
         }
     }
 }
 
-pub async fn timer_keepalive(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>) {
+pub async fn timer_keepalive(n: Arc<Mutex<BGPNeighbor>>, tx: mpsc::Sender<Event>) -> Result<()> {
     log::debug!("FSM Starting TimerKeepalive");
+
     loop {
-        sleep(Duration::from_secs(1)).await;
-        let k;
-        let h;
-        let s;
-        {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let (keepalive_timer, state, hold_time) = {
             let mut n = n.lock().await;
             n.attributes.keepalive_timer += 1;
-            k = n.attributes.keepalive_timer;
-            s = n.attributes.state;
-            h = n.attributes.hold_time as usize;
-        }
-        if s == BGPState::Idle {
+            (
+                n.attributes.keepalive_timer,
+                n.attributes.state,
+                n.attributes.hold_time as usize,
+            )
+        };
+
+        if state == BGPState::Idle {
             log::info!("FSM TimerKeepalive exiting due to Idle state");
-            break;
+            return Ok(());
         }
-        log::debug!("FSM TimerKeepalive incremented");
-        if k > h {
-            if let Err(e) = tx.send(Event::KeepaliveTimerExpires).await {
-                log::error!("Failed to send KeepaliveTimerExpires event: {}", e);
-                break; // Exit loop if send fails
-            }
+
+        log::trace!("FSM TimerKeepalive incremented to {}", keepalive_timer);
+
+        if keepalive_timer > hold_time {
+            tx.send(Event::KeepaliveTimerExpires)
+                .await
+                .context("Failed to send KeepaliveTimerExpires event")?;
         }
     }
-    log::info!("TimerKeepalive thread terminated");
 }

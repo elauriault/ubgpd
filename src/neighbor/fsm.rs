@@ -7,7 +7,9 @@ use super::timers;
 use super::types::{BGPState, Event};
 use crate::bgp;
 use crate::speaker;
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -22,45 +24,82 @@ pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
     log::debug!("FSM init_peer: Idle to Active");
 }
 
-pub async fn connect(speaker: Arc<Mutex<speaker::BGPSpeaker>>, neighbor: Arc<Mutex<BGPNeighbor>>) {
-    let socket;
+pub async fn connect(
+    speaker: Arc<Mutex<speaker::BGPSpeaker>>,
+    neighbor: Arc<Mutex<BGPNeighbor>>,
+) -> Result<()> {
+    let (remote_addr, local_ip, local_asn, ribtx) = {
+        let n = neighbor.lock().await;
+        let remote_ip = n
+            .remote_ip
+            .ok_or_else(|| anyhow!("Remote IP not configured"))?;
+        let remote_port = n
+            .remote_port
+            .ok_or_else(|| anyhow!("Remote port not configured"))?;
+        let remote_addr = format!("{}:{}", remote_ip, remote_port);
+        (remote_addr, n.local_ip, n.local_asn, n.ribtx.clone())
+    };
+
+    // Attempt connection with retry logic
+    let socket = match TcpStream::connect(&remote_addr).await {
+        Ok(socket) => socket,
+        Err(e) => {
+            log::error!("Failed to connect to {}: {}", remote_addr, e);
+            // Update neighbor state to Idle on connection failure
+            {
+                let mut n = neighbor.lock().await;
+                n.attributes.state = BGPState::Idle;
+                n.attributes.connect_retry_counter += 1;
+            }
+            // Schedule retry if appropriate
+            let connect_retry_time = {
+                let n = neighbor.lock().await;
+                n.attributes.connect_retry_time
+            };
+            tokio::time::sleep(Duration::from_secs(connect_retry_time as u64)).await;
+            return Err(anyhow!("Connection failed: {}", e));
+        }
+    };
+
+    // Update neighbor with connection details
     {
         let mut n = neighbor.lock().await;
-        socket = TcpStream::connect(
-            n.remote_ip.unwrap().to_string() + ":" + &n.remote_port.unwrap().to_string(),
-        )
-        .await
-        .unwrap();
         n.attributes.state = BGPState::Connect;
-        let local_addr = socket.local_addr().unwrap();
+        let local_addr = socket.local_addr().context("Failed to get local address")?;
         n.local_ip = Some(local_addr.ip());
         n.local_port = Some(local_addr.port());
-        {
-            let s = speaker.lock().await;
-            n.ribtx.clone_from(&s.ribtx);
-        }
+        n.ribtx = ribtx;
     }
 
-    tokio::spawn(async move { fsm_tcp(neighbor.clone(), socket, speaker).await });
+    // Spawn FSM handler
+    let speaker_clone = speaker.clone();
+    let neighbor_clone = neighbor.clone();
+    tokio::spawn(async move {
+        if let Err(e) = fsm_tcp(neighbor_clone, socket, speaker_clone).await {
+            log::error!("FSM error: {}", e);
+        }
+    });
+
+    Ok(())
 }
 
 pub async fn fsm_tcp(
     neighbor: Arc<Mutex<BGPNeighbor>>,
     stream: TcpStream,
     speaker: Arc<Mutex<speaker::BGPSpeaker>>,
-) {
-    log::debug!("starting fsm_tcp for {:?} with {:?}", neighbor, stream);
+) -> Result<()> {
+    log::debug!("starting fsm_tcp for neighbor");
 
     let (tx, mut rx) = mpsc::channel::<Event>(100);
-
     let mut server = Framed::new(stream, bgp::BGPMessageCodec);
 
-    let state;
-    {
+    let state = {
         let mut n = neighbor.lock().await;
-        state = n.attributes.state;
         n.tx = Some(tx.clone());
-    }
+        n.attributes.state
+    };
+
+    // Process initial state
     match state {
         BGPState::Active => {
             process_event(
@@ -69,7 +108,7 @@ pub async fn fsm_tcp(
                 neighbor.clone(),
                 Some(&mut server),
             )
-            .await;
+            .await?;
         }
         BGPState::Connect => {
             process_event(
@@ -78,53 +117,75 @@ pub async fn fsm_tcp(
                 neighbor.clone(),
                 Some(&mut server),
             )
-            .await;
+            .await?;
         }
         _ => {}
     };
 
     let na = neighbor.clone();
-
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    let hold_task = tokio::spawn(async { timers::timer_hold(na, receiver).await });
+    let hold_task = tokio::spawn(async {
+        if let Err(e) = timers::timer_hold(na, receiver).await {
+            log::error!("Hold timer error: {}", e);
+        }
+    });
 
+    let result = fsm_loop(&mut rx, &mut server, speaker.clone(), neighbor.clone()).await;
+
+    // Cleanup
+    let _ = sender.send(());
+    let _ = tokio::join!(hold_task);
+
+    // Update neighbor state
+    {
+        let mut n = neighbor.lock().await;
+        n.attributes.state = BGPState::Idle;
+        n.tx = None;
+    }
+
+    result
+}
+
+async fn fsm_loop(
+    rx: &mut mpsc::Receiver<Event>,
+    server: &mut Framed<TcpStream, bgp::BGPMessageCodec>,
+    speaker: Arc<Mutex<speaker::BGPSpeaker>>,
+    neighbor: Arc<Mutex<BGPNeighbor>>,
+) -> Result<()> {
     loop {
         tokio::select! {
             Some(e) = rx.recv() => {
                 if matches!(e, Event::TcpConnectionFails) {
                     log::info!("TCP connection termination requested");
-                    let _ = sender.send(());
-                    let _ = tokio::join!(hold_task);
-                    {
-                        let mut n = neighbor.lock().await;
-                        n.attributes.state = BGPState::Idle;
-                        n.tx = None;
-                    }
-                    break;
+                    return Ok(());
                 }
-                process_event(e, speaker.clone(), neighbor.clone(), Some(&mut server)).await;
+                process_event(e, speaker.clone(), neighbor.clone(), Some(server)).await?;
             }
-            Some(m) = connection::read_message(&mut server) => {
+            Some(m) = connection::read_message(server) => {
                 match m {
                     Ok(m) => {
-                        message_handler::process_message(m, speaker.clone(), neighbor.clone()).await;
+                        message_handler::process_message(m, speaker.clone(), neighbor.clone()).await?;
                     },
-                    Err(_) => {
+                    Err(e) => {
+                        log::error!("Failed to read message: {}", e);
                         process_event(
                             Event::TcpConnectionFails,
                             speaker.clone(),
                             neighbor.clone(),
-                            Some(&mut server),
+                            Some(server),
                         )
-                        .await;
-                        let _ = sender.send(());
-                        let _ = tokio::join!(hold_task);
-                        break;
+                        .await?;
+                        return Err(anyhow!("Connection read error: {}", e));
                     },
                 }
             }
+            else => {
+                log::debug!("FSM loop ended - no more events or messages");
+                break;
+            }
         }
     }
+    Ok(())
 }
 
 pub async fn process_event(
@@ -132,47 +193,48 @@ pub async fn process_event(
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
     server: Option<&mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>>,
-) {
-    let state;
-    {
+) -> Result<()> {
+    let state = {
         let nb = nb.lock().await;
-        state = nb.attributes.state;
-    }
+        nb.attributes.state
+    };
 
     match server {
         Some(server) => match state {
             BGPState::Active => {
                 log::debug!("FSM ACTIVE: received {:?}", e);
-                process_event_active(e, s, nb, server).await;
+                process_event_active(e, s, nb, server).await
             }
             BGPState::Connect => {
                 log::debug!("FSM CONNECT: received {:?}", e);
-                process_event_connect(e, s, nb, server).await;
+                process_event_connect(e, s, nb, server).await
             }
             BGPState::OpenConfirm => {
                 log::debug!("FSM OPENCONFIRM: received {:?}", e);
-                process_event_openconfirm(e, s, nb, server).await;
+                process_event_openconfirm(e, s, nb, server).await
             }
             BGPState::OpenSent => {
                 log::debug!("FSM OPENSENT: received {:?}", e);
-                process_event_opensent(e, nb, server).await;
+                process_event_opensent(e, nb, server).await
             }
             BGPState::Established => {
                 log::debug!("FSM ESTABLISHED: received {:?}", e);
-                process_event_established(e, nb, server).await;
+                process_event_established(e, nb, server).await
             }
-            _ => {}
+            _ => Ok(()),
         },
         None => {
             if let BGPState::Idle = state {
                 log::debug!("FSM IDLE: received {:?}", e);
-                process_event_idle(e, nb).await;
+                process_event_idle(e, nb).await
+            } else {
+                Ok(())
             }
         }
     }
 }
 
-pub async fn process_event_idle(e: Event, nb: Arc<Mutex<BGPNeighbor>>) {
+pub async fn process_event_idle(e: Event, nb: Arc<Mutex<BGPNeighbor>>) -> Result<()> {
     match e {
         Event::ManualStartWithPassiveTcpEstablishment => {
             log::debug!("FSM IDLE: {:?} to be implemented", e);
@@ -190,6 +252,7 @@ pub async fn process_event_idle(e: Event, nb: Arc<Mutex<BGPNeighbor>>) {
             log::debug!("{:?}", e);
         }
     }
+    Ok(())
 }
 
 pub async fn process_event_connect(
@@ -197,7 +260,7 @@ pub async fn process_event_connect(
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) {
+) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
             connection::send_keepalive(server).await.unwrap();
@@ -236,6 +299,7 @@ pub async fn process_event_connect(
             log::debug!("FSM CONNECT: {:?} looks like an error", e);
         }
     }
+    Ok(())
 }
 
 pub async fn process_event_active(
@@ -243,7 +307,7 @@ pub async fn process_event_active(
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) {
+) -> Result<()> {
     match e {
         Event::ManualStop => {
             log::debug!("FSM ACTIVE: {:?} to be implemented", e);
@@ -288,13 +352,14 @@ pub async fn process_event_active(
             log::debug!("FSM Looks {:?} like an error", e);
         }
     }
+    Ok(())
 }
 
 pub async fn process_event_opensent(
     e: Event,
     _nb: Arc<Mutex<BGPNeighbor>>,
     _server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) {
+) -> Result<()> {
     match e {
         Event::HoldTimerExpires => {
             log::debug!("FSM OPENSENT: {:?} to be implemented", e);
@@ -321,6 +386,7 @@ pub async fn process_event_opensent(
             log::debug!("FSM OPENSENT: {:?} looks like an error", e);
         }
     }
+    Ok(())
 }
 
 pub async fn process_event_openconfirm(
@@ -328,7 +394,7 @@ pub async fn process_event_openconfirm(
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) {
+) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
             connection::send_keepalive(server).await.unwrap();
@@ -362,13 +428,14 @@ pub async fn process_event_openconfirm(
             log::debug!("FSM OPENCONFIRM: {:?} looks like an error", e);
         }
     }
+    Ok(())
 }
 
 pub async fn process_event_established(
     e: Event,
     nb: Arc<Mutex<BGPNeighbor>>,
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
-) {
+) -> Result<()> {
     match e {
         Event::HoldTimerExpires => {
             log::debug!("FSM ESTABLISHED: {:?} to be implemented", e);
@@ -398,4 +465,5 @@ pub async fn process_event_established(
             log::debug!("FSM ESTABLISHED: {:?} looks like an error", e);
         }
     }
+    Ok(())
 }

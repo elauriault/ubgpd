@@ -6,6 +6,7 @@ use super::types::{BGPState, Event};
 use crate::bgp::{self, AddressFamily, Nlri};
 use crate::rib::{RibUpdate, RouteAttributes};
 use crate::speaker::{self};
+use anyhow::{anyhow, Context, Result};
 use log::log;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -17,36 +18,36 @@ pub async fn process_message(
     m: bgp::Message,
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
-) {
-    let state;
-    {
+) -> Result<()> {
+    let state = {
         let nb = nb.lock().await;
-        state = nb.attributes.state;
-    }
+        nb.attributes.state
+    };
+
     match state {
         BGPState::Active => {
             log::debug!("FSM ACTIVE: received {:?}", m.body);
-            process_message_active(m, s, nb).await;
+            process_message_active(m, s, nb).await
         }
         BGPState::Connect => {
             log::debug!("FSM CONNECT: received {:?}", m.body);
-            process_message_connect(m, nb).await;
+            process_message_connect(m, nb).await
         }
         BGPState::OpenConfirm => {
             log::debug!("FSM OPENCONFIRM: received {:?}", m.body);
-            process_message_openconfirm(m, s, nb).await;
+            process_message_openconfirm(m, s, nb).await
         }
         BGPState::OpenSent => {
             log::debug!("FSM OPENSENT: received {:?}", m.body);
-            process_message_opensent(m, s, nb).await;
+            process_message_opensent(m, s, nb).await
         }
         BGPState::Established => {
             log::debug!("FSM ESTABLISHED: received {:?}", m.body);
-            process_message_established(m, s, nb).await;
+            process_message_established(m, s, nb).await
         }
         BGPState::Idle => {
             log::debug!("FSM IDLE: received {:?}", m.body);
-            process_message_idle(m, nb).await;
+            process_message_idle(m, nb).await
         }
     }
 }
@@ -55,62 +56,76 @@ pub async fn process_message_opensent(
     m: bgp::Message,
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
-) {
+) -> Result<()> {
     match m.body {
         bgp::BGPMessageBody::Keepalive(_body) => {
             handle_keepalive(nb).await;
+            Ok(())
         }
         bgp::BGPMessageBody::Open(body) => {
             log::debug!("FSM OPENSENT: Open {}", body);
-            let tx;
-            {
+            let tx = {
                 let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
-            }
+                n.tx.clone()
+                    .ok_or_else(|| anyhow!("No tx channel available"))?
+            };
+
             match collision_detection(body.clone(), s).await {
                 true => {
-                    tx.send(Event::OpenCollisionDump).await.unwrap();
+                    tx.send(Event::OpenCollisionDump)
+                        .await
+                        .context("Failed to send OpenCollisionDump event")?;
                 }
                 false => match validate_open(body.clone(), nb.clone()).await {
                     false => {
-                        tx.send(Event::BGPOpenMsgErr).await.unwrap();
+                        tx.send(Event::BGPOpenMsgErr)
+                            .await
+                            .context("Failed to send BGPOpenMsgErr event")?;
                     }
                     true => {
                         update_from_open(body.clone(), nb.clone()).await;
-                        let ta;
-                        {
+                        let ta = {
                             let n = nb.lock().await;
-                            ta = n.tx.clone().unwrap();
-                        }
-                        tokio::spawn(async {
-                            timers::timer_keepalive(nb, ta).await;
+                            n.tx.clone()
+                                .ok_or_else(|| anyhow!("No tx channel available"))?
+                        };
+
+                        let nb_clone = nb.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = timers::timer_keepalive(nb_clone, ta).await {
+                                log::error!("Keepalive timer error: {}", e);
+                            }
                         });
                         log::debug!("FSM OPENSENT: OpenSent to OpenConfirm");
-                        // tx.send(Event::BGPOpen).await.unwrap();
                     }
                 },
             }
+            Ok(())
         }
         bgp::BGPMessageBody::Notification(_body) => {
             log::debug!("FSM OPENSENT: Notification unimplemented");
+            Ok(())
         }
         _ => {
             log::debug!("FSM OPENSENT: Unimplemented");
-            let tx;
-            {
+            let tx = {
                 let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
-            }
-            tx.send(Event::NotifMsg).await.unwrap();
+                n.tx.clone()
+                    .ok_or_else(|| anyhow!("No tx channel available"))?
+            };
+            tx.send(Event::NotifMsg)
+                .await
+                .context("failed to send notifmsg event")?;
+            Ok(())
         }
-    };
+    }
 }
 
 pub async fn process_message_active(
     m: bgp::Message,
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
-) {
+) -> Result<()> {
     match m.body {
         bgp::BGPMessageBody::Open(body) => {
             log::debug!("FSM ACTIVE: Open {}", body);
@@ -121,11 +136,17 @@ pub async fn process_message_active(
             }
             match collision_detection(body.clone(), s).await {
                 true => {
-                    tx.send(Event::OpenCollisionDump).await.unwrap();
+                    tx.send(Event::OpenCollisionDump)
+                        .await
+                        .context("failed to send OpenCollisionDump event")?;
+                    Ok(())
                 }
                 false => match validate_open(body.clone(), nb.clone()).await {
                     false => {
-                        tx.send(Event::BGPOpenMsgErr).await.unwrap();
+                        tx.send(Event::BGPOpenMsgErr)
+                            .await
+                            .context("failed to send BGPOpenMsgErr event")?;
+                        Ok(())
                     }
                     true => {
                         update_from_open(body.clone(), nb.clone()).await;
@@ -138,7 +159,10 @@ pub async fn process_message_active(
                             timers::timer_keepalive(nb, ta).await;
                         });
                         log::debug!("FSM ACTIVE: Active to OpenConfirm");
-                        tx.send(Event::BGPOpen).await.unwrap();
+                        tx.send(Event::BGPOpen)
+                            .await
+                            .context("failed to send BGPOpen event")?;
+                        Ok(())
                     }
                 },
             }
@@ -147,27 +171,32 @@ pub async fn process_message_active(
             let tx;
             {
                 let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
+                tx =
+                    n.tx.clone()
+                        .ok_or_else(|| anyhow!("No tx channel available"))?
             }
-            tx.send(Event::NotifMsg).await.unwrap();
+            tx.send(Event::NotifMsg)
+                .await
+                .context("failed to send notifmsg event")?;
+            Ok(())
         }
         _ => {
             log::debug!("Unimplemented");
+            Ok(())
         }
-    };
+    }
 }
 
-pub async fn process_message_connect(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
-    {
-        log::debug!("FSM Shouldn't receive messages in Connect state");
-    };
+pub async fn process_message_connect(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) -> Result<()> {
+    log::debug!("FSM Shouldn't receive messages in Connect state");
+    Ok(())
 }
 
 pub async fn process_message_openconfirm(
     m: bgp::Message,
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
-) {
+) -> Result<()> {
     match m.body {
         bgp::BGPMessageBody::Keepalive(_body) => {
             handle_keepalive(nb.clone()).await;
@@ -178,6 +207,7 @@ pub async fn process_message_openconfirm(
                 send_locrib(s.clone(), n.clone()).await;
             }
             log::debug!("FSM OpenConfirm to Established");
+            Ok(())
         }
         bgp::BGPMessageBody::Notification(_body) => {
             let tx;
@@ -186,38 +216,43 @@ pub async fn process_message_openconfirm(
                 tx = n.tx.clone().unwrap();
             }
             tx.send(Event::NotifMsg).await.unwrap();
+            Ok(())
         }
         _ => {
             log::debug!("Unimplemented");
+            Ok(())
         }
-    };
+    }
 }
 
 pub async fn process_message_established(
     m: bgp::Message,
     s: Arc<Mutex<speaker::BGPSpeaker>>,
     nb: Arc<Mutex<BGPNeighbor>>,
-) {
+) -> Result<()> {
     match m.body {
         bgp::BGPMessageBody::Keepalive(_body) => {
             handle_keepalive(nb).await;
+            Ok(())
         }
         bgp::BGPMessageBody::Notification(body) => {
             handle_notification(body, s, nb).await;
+            Ok(())
         }
         bgp::BGPMessageBody::Update(body) => {
             handle_update(body, s, nb).await;
+            Ok(())
         }
         _ => {
             log::debug!("Unimplemented");
+            Ok(())
         }
-    };
+    }
 }
 
-pub async fn process_message_idle(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) {
-    {
-        log::debug!("Unimplemented");
-    };
+pub async fn process_message_idle(_m: bgp::Message, _nb: Arc<Mutex<BGPNeighbor>>) -> Result<()> {
+    log::debug!("FSM Shouldn't receive messages in Idle state");
+    Ok(())
 }
 
 pub async fn handle_notification(

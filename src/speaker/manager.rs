@@ -2,6 +2,7 @@
 //
 // This file contains RIB and FIB management functionality.
 
+use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
@@ -139,7 +140,6 @@ async fn loc_rib_withdraw(
     modified
 }
 
-/// Manage the Routing Information Base (RIB).
 pub async fn rib_mgr(
     rib: Arc<Mutex<rib::Rib>>,
     fib: Arc<Mutex<fib::Fib>>,
@@ -149,48 +149,77 @@ pub async fn rib_mgr(
     tx: tokio::sync::mpsc::Sender<FibEvent>,
 ) {
     loop {
-        let e = rx.recv().await.unwrap();
-        log::debug!("Rib Manager got {:?}", e);
+        match rx.recv().await {
+            Some(e) => {
+                log::debug!("Rib Manager got {:?}", e);
 
-        match e {
-            RibEvent::UpdateRoutes(msg) => {
-                let mut modified = vec![];
-
-                if let Some(routes) = msg.added {
-                    log::debug!("Adding routes {:?} from {:?}", routes, msg.rid);
-                    let mut added =
-                        loc_rib_added(rib.clone(), fib.clone(), asn, routes.clone()).await;
-                    modified.append(&mut added);
+                if let Err(e) =
+                    process_rib_event(e, rib.clone(), fib.clone(), neighbors.clone(), asn, &tx)
+                        .await
+                {
+                    log::error!("Error processing RIB event: {}", e);
                 }
+            }
+            None => {
+                log::info!("RIB manager channel closed, exiting");
+                break;
+            }
+        }
 
-                if let Some(routes) = msg.withdrawn {
-                    let mut withdraw =
-                        loc_rib_withdraw(rib.clone(), fib.clone(), routes.clone()).await;
-                    modified.append(&mut withdraw);
-                }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
 
-                log::debug!(
-                    "The following have modified best route and need to be propagated {:?}",
-                    modified
-                );
+async fn process_rib_event(
+    event: RibEvent,
+    rib: Arc<Mutex<rib::Rib>>,
+    fib: Arc<Mutex<fib::Fib>>,
+    neighbors: Vec<Arc<Mutex<neighbor::BGPNeighbor>>>,
+    asn: u16,
+    tx: &tokio::sync::mpsc::Sender<FibEvent>,
+) -> Result<()> {
+    match event {
+        RibEvent::UpdateRoutes(msg) => {
+            let mut modified = vec![];
 
-                if !modified.is_empty() {
-                    let _ = tx.send(FibEvent::RibUpdated).await;
-                    for n in &neighbors {
-                        let n = n.lock().await;
-                        if n.is_established().await {
-                            let tx = n.tx.clone();
-                            tx.unwrap()
-                                .send(neighbor::Event::RibUpdate(modified.clone()))
-                                .await
-                                .unwrap();
+            if let Some(routes) = msg.added {
+                log::debug!("Adding routes {:?} from {:?}", routes, msg.rid);
+                let mut added = loc_rib_added(rib.clone(), fib.clone(), asn, routes).await;
+                modified.append(&mut added);
+            }
+
+            if let Some(routes) = msg.withdrawn {
+                let mut withdraw = loc_rib_withdraw(rib.clone(), fib.clone(), routes).await;
+                modified.append(&mut withdraw);
+            }
+
+            log::debug!(
+                "The following have modified best route and need to be propagated {:?}",
+                modified
+            );
+
+            if !modified.is_empty() {
+                tx.send(FibEvent::RibUpdated)
+                    .await
+                    .context("Failed to send FIB update event")?;
+
+                for n in &neighbors {
+                    let n = n.lock().await;
+                    if n.is_established().await {
+                        if let Some(tx) = &n.tx {
+                            if let Err(e) =
+                                tx.send(neighbor::Event::RibUpdate(modified.clone())).await
+                            {
+                                log::error!("Failed to send RIB update to neighbor: {}", e);
+                            }
                         }
                     }
                 }
             }
         }
-        sleep(Duration::from_secs(1)).await;
     }
+
+    Ok(())
 }
 
 /// Manage the Forwarding Information Base (FIB).
@@ -201,18 +230,33 @@ pub async fn fib_mgr(
 ) {
     log::debug!("starting fib manager");
 
-    loop {
-        let e = rx.recv().await.unwrap();
-        match e {
-            FibEvent::RibUpdated => {
-                log::debug!("Fib Manager : Got {:?}", e);
-                let mut fib = fib.lock().await;
-                fib.refresh().await;
-                fib.sync(rib.clone()).await;
-            }
-        }
-        sleep(Duration::from_secs(1)).await;
+    // Initial FIB refresh
+    {
         let mut fib = fib.lock().await;
         fib.refresh().await;
+    }
+
+    loop {
+        // Use timeout to periodically refresh FIB even without events
+        match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
+            Ok(Some(e)) => match e {
+                FibEvent::RibUpdated => {
+                    log::debug!("Fib Manager: Got RIB update event");
+                    let mut fib = fib.lock().await;
+                    fib.refresh().await;
+                    fib.sync(rib.clone()).await;
+                }
+            },
+            Ok(None) => {
+                log::info!("FIB manager channel closed, exiting");
+                break;
+            }
+            Err(_) => {
+                // Timeout - do periodic refresh
+                log::trace!("FIB periodic refresh");
+                let mut fib = fib.lock().await;
+                fib.refresh().await;
+            }
+        }
     }
 }

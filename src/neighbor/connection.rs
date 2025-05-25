@@ -18,11 +18,11 @@ pub async fn send_open(
     capabilities: Capabilities,
 ) -> Result<()> {
     let body = bgp::BGPOpenMessage::new(asn, rid, hold, capabilities)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        .map_err(|e| anyhow!("Failed to create OPEN message: {}", e))?;
 
     let message: Vec<u8> =
         bgp::Message::new(bgp::MessageType::Open, bgp::BGPMessageBody::Open(body))
-            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .context("Failed to create BGP message")?
             .into();
 
     server
@@ -40,82 +40,106 @@ pub async fn send_update(
 ) -> Result<()> {
     let mut wd: Vec<Nlri> = vec![];
     let mut updates: HashMap<RouteAttributes, Vec<Nlri>> = HashMap::new();
+
+    // Get router ID safely
+    let router_id = {
+        let n = neighbor.lock().await;
+        n.remote_rid
+            .ok_or_else(|| anyhow!("Remote router ID not set"))?
+    };
+
     for (n, a) in nlris {
         match a {
             None => wd.push(n),
-            Some(route_attributes) => match updates.get_mut(&route_attributes) {
-                None => {
-                    let router_id;
-                    {
-                        let neighbor = neighbor.lock().await;
-                        router_id = neighbor.remote_rid.unwrap();
-                    }
-                    if !route_attributes.is_from_neighbor(router_id) {
-                        updates.insert(route_attributes.clone(), vec![n]);
-                    }
-                }
-                Some(atr) => {
-                    atr.push(n);
-                }
-            },
-        }
-    }
-    if !updates.is_empty() || !wd.is_empty() {
-        let mut nlris = vec![];
-        let mut attributes = vec![];
-        for (mut ra, mut routes) in updates {
-            {
-                let neighbor = neighbor.lock().await;
-                let local_asn = neighbor.local_asn;
-                let local_ip = neighbor.local_ip.unwrap();
-                let remote_asn = neighbor.remote_asn.unwrap();
-                if local_asn != remote_asn {
-                    ra.next_hop = local_ip;
-                    ra.prepend(local_asn, 1);
-                } else if ra.is_from_ibgp() {
-                    break;
+            Some(route_attributes) => {
+                if !route_attributes.is_from_neighbor(router_id) {
+                    updates
+                        .entry(route_attributes.clone())
+                        .or_insert_with(Vec::new)
+                        .push(n);
                 }
             }
-            let mut pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
-                .into_iter()
-                .filter(|x| x.is_transitive())
-                .collect::<Vec<bgp::PathAttribute>>();
-            attributes.append(&mut pa);
-            nlris.append(&mut routes);
         }
-        let body = bgp::BGPUpdateMessageBuilder::default()
-            .withdrawn_routes(wd.clone())
-            .path_attributes(attributes)
-            .nlri(nlris)
-            .build()
-            .unwrap();
-        log::info!("Sending UPDATE {:?}", body);
-        let message: Vec<u8> =
-            Message::new(bgp::MessageType::Update, bgp::BGPMessageBody::Update(body))
-                .unwrap()
-                .into();
-        match server.send(message).await {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(anyhow!("Failed to send UPDATE message: {}", e));
+    }
+
+    if updates.is_empty() && wd.is_empty() {
+        return Ok(());
+    }
+
+    let mut nlris = vec![];
+    let mut attributes = vec![];
+
+    for (mut ra, mut routes) in updates {
+        let should_send = {
+            let neighbor = neighbor.lock().await;
+            let local_asn = neighbor.local_asn;
+            let local_ip = neighbor
+                .local_ip
+                .ok_or_else(|| anyhow!("Local IP not set"))?;
+            let remote_asn = neighbor
+                .remote_asn
+                .ok_or_else(|| anyhow!("Remote ASN not set"))?;
+
+            if local_asn != remote_asn {
+                ra.next_hop = local_ip;
+                ra.prepend(local_asn, 1);
+                true
+            } else if ra.is_from_ibgp() {
+                false
+            } else {
+                true
             }
         };
-        wd.clear();
+
+        if !should_send {
+            continue;
+        }
+
+        let mut pa = Into::<Vec<bgp::PathAttribute>>::into(ra)
+            .into_iter()
+            .filter(|x| x.is_transitive())
+            .collect::<Vec<bgp::PathAttribute>>();
+        attributes.append(&mut pa);
+        nlris.append(&mut routes);
     }
+
+    let body = bgp::BGPUpdateMessageBuilder::default()
+        .withdrawn_routes(wd.clone())
+        .path_attributes(attributes)
+        .nlri(nlris)
+        .build()
+        .map_err(|e| anyhow!("Failed to build UPDATE message: {}", e))?;
+
+    log::info!("Sending UPDATE {:?}", body);
+
+    let message: Vec<u8> =
+        Message::new(bgp::MessageType::Update, bgp::BGPMessageBody::Update(body))
+            .context("Failed to create UPDATE message")?
+            .into();
+
+    server
+        .send(message)
+        .await
+        .context("Failed to send UPDATE message")?;
+
     Ok(())
 }
 
 pub async fn send_keepalive(
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
 ) -> Result<()> {
-    let body = bgp::BGPKeepaliveMessage::new().unwrap();
+    let body = bgp::BGPKeepaliveMessage::new()
+        .map_err(|e| anyhow!("Failed to create KEEPALIVE message: {}", e))?;
+
     let message: Vec<u8> = bgp::Message::new(
         bgp::MessageType::Keepalive,
         bgp::BGPMessageBody::Keepalive(body.clone()),
     )
-    .unwrap()
+    .context("Failed to create KEEPALIVE message")?
     .into();
-    log::debug!("FSM KeepaliveTimerExpires: Sending {:?}", body);
+
+    log::debug!("Sending KEEPALIVE");
+
     server
         .send(message)
         .await
@@ -125,15 +149,12 @@ pub async fn send_keepalive(
 pub async fn read_message(
     server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
 ) -> Option<Result<bgp::Message, std::io::Error>> {
-    let message = server.next().await;
-    match message {
-        Some(bytes) => match bytes {
-            Err(e) => Some(Err(e)),
-            Ok(r) => {
-                let bytes: bgp::Message = bgp::Message::from(r);
-                Some(Ok(bytes))
-            }
-        },
+    match server.next().await {
+        Some(Ok(bytes)) => {
+            let message = bgp::Message::from(bytes);
+            Some(Ok(message))
+        }
+        Some(Err(e)) => Some(Err(e)),
         None => None,
     }
 }
