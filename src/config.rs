@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::io::prelude::*;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
@@ -8,13 +9,13 @@ use serde_derive::Deserialize;
 
 pub const BGP_DEFAULT_PORT: u16 = 179;
 pub const BGP_DEFAULT_HOLD_TIME: u16 = 3;
-pub const BGP_DEFAULT_LOCAL_IP: &str = "127.0.0.1";
+pub const BGP_DEFAULT_LOCAL_IP: &str = "[::]:0";
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub asn: u16,
     pub rid: Ipv4Addr,
     #[serde(default)]
-    pub localip: Option<Ipv4Addr>,
+    pub localips: Option<Vec<IpAddr>>,
     #[serde(default)]
     pub port: Option<u16>,
     #[serde(default)]

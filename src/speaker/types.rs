@@ -3,6 +3,7 @@
 // This file contains the main BGPSpeaker struct and its associated types.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,7 +21,7 @@ pub struct BGPSpeaker {
     pub local_asn: u16,
     pub router_id: u32,
     pub hold_time: u16,
-    pub local_ip: Ipv4Addr,
+    pub local_ips: Vec<IpAddr>,
     pub local_port: u16,
     pub families: Vec<bgp::AddressFamily>,
     pub rib: HashMap<bgp::AddressFamily, Arc<Mutex<rib::Rib>>>,
@@ -34,7 +35,7 @@ impl BGPSpeaker {
         local_asn: u16,
         router_id: u32,
         hold_time: u16,
-        local_ip: Ipv4Addr,
+        local_ips: Vec<IpAddr>,
         local_port: u16,
         families: Vec<bgp::AddressFamily>,
     ) -> Self {
@@ -42,7 +43,7 @@ impl BGPSpeaker {
             .local_asn(local_asn)
             .router_id(router_id)
             .hold_time(hold_time)
-            .local_ip(local_ip)
+            .local_ips(local_ips)
             .local_port(local_port)
             .families(families)
             .rib(HashMap::new())
