@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  ubgp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.ubgp
+    networks:
+      net1:
+        ipv4_address: 1.1.1.1
+        ipv6_address: "2001:1:dead:beef::1"
+      net2:
+        ipv4_address: 2.2.2.1
+        ipv6_address: "2001:2:dead:beef::1"
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./ubgpd.conf:/etc/ubgpd.conf
+
+  gobgp:
+    image: osrg/gobgp
+    networks:
+      net1:
+        ipv4_address: 1.1.1.2
+        ipv6_address: "2001:1:dead:beef::2"
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./gobgp.conf:/etc/gobgp/gobgp.conf
+
+  frr:
+    image: frrouting/frr:v8.5.1
+    networks:
+      net2:
+        ipv4_address: 2.2.2.3
+        ipv6_address: "2001:2:dead:beef::3"
+    cap_add: [NET_ADMIN]
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+    volumes:
+      - ./frr.conf:/etc/frr/frr.conf
+
+networks:
+  net1:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 1.1.1.0/24
+        - subnet: "2001:1:dead:beef::/64"
+  net2:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 2.2.2.0/24
+        - subnet: "2001:2:dead:beef::/64"
