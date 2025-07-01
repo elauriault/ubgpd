@@ -1,7 +1,8 @@
 use bytes::{Buf, BytesMut};
+use num_traits::FromPrimitive;
+use std::io;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
-// use std::io;
 
 use super::types::*;
 
@@ -20,25 +21,39 @@ impl Decoder for BGPMessageCodec {
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < 19 {
+        if src.len() < MIN_MESSAGE_LENGTH {
             return Ok(None);
         }
         if !src.starts_with(&MARKER) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "Message should start with marker".to_string(),
+                "Invalid BGP marker - message should start with 16 bytes of 0xFF",
             ));
+        }
+        if src.len() < 18 {
+            return Ok(None);
         }
         let mut length_bytes = [0u8; 2];
         length_bytes.copy_from_slice(&src[16..18]);
         let length = u16::from_be_bytes(length_bytes) as usize;
-        if length > MAX {
+        if let Err(e) = validate_message_length(length) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", length),
+                format!("Invalid BGP message length: {}", e),
             ));
         }
-
+        if src.len() < length {
+            return Ok(None);
+        }
+        if length >= MIN_MESSAGE_LENGTH {
+            let message_type = src[18];
+            if MessageType::from_u8(message_type).is_none() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid BGP message type: {}", message_type),
+                ));
+            }
+        }
         let data = src[0..length].to_vec();
         src.advance(length);
 
@@ -50,17 +65,92 @@ impl Encoder<Vec<u8>> for BGPMessageCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, data: Vec<u8>, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        if data.len() + MARKER.len() > MAX {
+        let total_length = data.len() + MARKER.len() + 2;
+
+        if let Err(e) = validate_message_length(total_length) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", data.len()),
+                format!("BGP message too large for encoding: {}", e),
             ));
         }
-        let len_slice = u16::to_be_bytes(data.len() as u16 + MARKER.len() as u16 + 2);
-        buf.reserve(MARKER.len() + 2 + data.len());
+        buf.reserve(total_length);
         buf.extend_from_slice(&MARKER);
+        let len_slice = u16::to_be_bytes(total_length as u16);
         buf.extend_from_slice(&len_slice);
         buf.extend_from_slice(data.as_slice());
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+
+    #[test]
+    fn test_decoder_minimum_length() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[0xff; 10]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_decoder_invalid_marker() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        let mut invalid_msg = vec![0xfe; 16];
+        invalid_msg.extend_from_slice(&[0, 19]);
+        invalid_msg.push(4);
+        buf.extend_from_slice(&invalid_msg);
+
+        assert!(codec.decode(&mut buf).is_err());
+    }
+
+    #[test]
+    fn test_decoder_invalid_message_type() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        let mut invalid_msg = MARKER.to_vec();
+        invalid_msg.extend_from_slice(&[0, 19]);
+        invalid_msg.push(99);
+        buf.extend_from_slice(&invalid_msg);
+
+        assert!(codec.decode(&mut buf).is_err());
+    }
+
+    #[test]
+    fn test_decoder_valid_keepalive() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        let mut valid_msg = MARKER.to_vec();
+        valid_msg.extend_from_slice(&[0, 19]);
+        valid_msg.push(4);
+        buf.extend_from_slice(&valid_msg);
+
+        let result = codec.decode(&mut buf).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().len(), 19);
+    }
+
+    #[test]
+    fn test_encoder_message_too_large() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        let large_data = vec![0; MAX_MESSAGE_LENGTH];
+        assert!(codec.encode(large_data, &mut buf).is_err());
+    }
+
+    #[test]
+    fn test_encoder_valid_message() {
+        let mut codec = BGPMessageCodec;
+        let mut buf = BytesMut::new();
+        let keepalive_body = vec![4];
+        assert!(codec.encode(keepalive_body, &mut buf).is_ok());
+        assert_eq!(buf.len(), 19);
+        assert_eq!(&buf[0..16], &MARKER);
+        assert_eq!(&buf[16..18], &[0, 19]);
+        assert_eq!(buf[18], 4);
     }
 }

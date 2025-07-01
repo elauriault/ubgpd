@@ -1,0 +1,49 @@
+# Dockerfile.ubgp
+
+FROM rust:1.78-slim as builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  protobuf-compiler \
+  iproute2 \
+  iputils-ping \
+  net-tools \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy source code
+WORKDIR /usr/src/ubgpd
+COPY . .
+
+# Build ubgpd in release mode
+RUN cargo build --release
+
+# Stage 2: Create a slim runtime image
+FROM ubuntu:24.04
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+  iproute2 \
+  iputils-ping \
+  net-tools \
+  libssl3 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Set up app directory
+WORKDIR /app
+
+# Copy the binary from builder
+COPY --from=builder /usr/src/ubgpd/target/release/ubgpd /usr/local/bin/ubgpd
+COPY --from=builder /usr/src/ubgpd/target/release/ubgpc /usr/local/bin/ubgpc
+
+# Copy default config if needed
+COPY ./tests/integration/ubgpd.conf /etc/ubgpd.conf
+
+# Optional: expose BGP and gRPC ports
+EXPOSE 179/tcp
+EXPOSE 50051/tcp
+
+# Use syslog or file-based logging
+ENV RUST_LOG=info
+
+# Default command
+CMD ["ubgpd", "--config", "/etc/ubgpd.conf"]

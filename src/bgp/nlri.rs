@@ -22,11 +22,16 @@ pub struct Ipv6Octets {
     pub octets: Vec<u8>,
 }
 
+/// Returns the number of bytes needed to represent a prefix of length `plen`.
+fn prefix_bytes(plen: u8) -> usize {
+    (plen as usize).div_ceil(8)
+}
+
 impl From<Nlri> for Vec<u8> {
     fn from(val: Nlri) -> Self {
         let mut buf = Cursor::new(vec![]);
         buf.write_u8(val.net.prefix_len()).unwrap();
-        let blen = (val.net.prefix_len() as f32 / 8.0).ceil() as usize;
+        let blen = prefix_bytes(val.net.prefix_len());
         match val.net {
             IpNet::V4(v) => {
                 let addrv4: u32 = v.network().into();
@@ -134,22 +139,16 @@ impl From<Vec<u8>> for Mpnlri {
         let mut src = src;
         let total_len = src.remove(0) as usize;
 
-        let mut afi = [0u8; 2];
-        afi.copy_from_slice(&src[0..2]);
-        let afi = u16::from_be_bytes(afi);
+        let afi = u16::from_be_bytes([src[0], src[1]]);
         let afi: Afi = FromPrimitive::from_u16(afi).unwrap();
 
-        let mut safi = [0u8; 1];
-        safi.copy_from_slice(&src[2..3]);
-        let safi = u8::from_be_bytes(safi);
+        let safi = src[2];
         let safi: Safi = FromPrimitive::from_u8(safi).unwrap();
 
-        let mut nhl = [0u8; 1];
-        nhl.copy_from_slice(&src[3..4]);
-        let nhl: usize = u8::from_be_bytes(nhl).into();
+        let nhl = src[3];
+        let nhl = nhl as usize;
 
-        let mut addr: Vec<u8> = vec![0; nhl];
-        addr.copy_from_slice(&src[4..4 + nhl]);
+        let mut addr = src[4..4 + nhl].to_vec();
 
         let nh: IpAddr;
         let mut i = 4 + nhl + 1;
@@ -162,13 +161,13 @@ impl From<Vec<u8>> for Mpnlri {
 
                 while i < total_len {
                     let plen = src[i];
-                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let end = i + prefix_bytes(plen) + 1;
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
                     };
                     let n: Nlri = buf.into();
                     nlris.push(n);
-                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
                 }
             }
@@ -190,13 +189,13 @@ impl From<Vec<u8>> for Mpnlri {
 
                 while i < total_len {
                     let plen = src[i];
-                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let end = i + prefix_bytes(plen) + 1;
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),
                     };
                     let n: Nlri = buf.into();
                     nlris.push(n);
-                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
                 }
             }
@@ -227,26 +226,26 @@ impl From<Vec<u8>> for Mpunlri {
             Afi::Ipv4 => {
                 while i < total_len {
                     let plen = src[i];
-                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let end = i + prefix_bytes(plen) + 1;
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
                     };
                     let n: Nlri = buf.into();
                     nlris.push(n);
-                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
                 }
             }
             Afi::Ipv6 => {
                 while i < total_len {
                     let plen = src[i];
-                    let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+                    let end = i + prefix_bytes(plen) + 1;
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),
                     };
                     let n: Nlri = buf.into();
                     nlris.push(n);
-                    let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
+                    let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
                 }
             }
@@ -310,7 +309,74 @@ impl From<Mpunlri> for Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+    use ipnet::{Ipv4Net, Ipv6Net};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    // Include the NLRI tests from the original bgp.rs
+    #[test]
+    fn test_nlri_ipv4_vec_conversion() {
+        let net = IpNet::V4(Ipv4Net::new(Ipv4Addr::new(192, 0, 2, 0), 24).unwrap());
+        let nlri = Nlri { net };
+        let bytes: Vec<u8> = nlri.clone().into();
+        assert_eq!(bytes, vec![24, 192, 0, 2]);
+        let octets = Ipv4Octets {
+            octets: bytes.clone(),
+        };
+        let nlri2: Nlri = octets.into();
+        assert_eq!(nlri, nlri2);
+    }
+
+    #[test]
+    fn test_nlri_ipv6_vec_conversion() {
+        let net =
+            IpNet::V6(Ipv6Net::new(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32).unwrap());
+        let nlri = Nlri { net };
+        let bytes: Vec<u8> = nlri.clone().into();
+        assert_eq!(bytes[0], 32);
+        assert_eq!(&bytes[1..5], &[0x20, 0x01, 0x0d, 0xb8]);
+        let octets = Ipv6Octets {
+            octets: bytes.clone(),
+        };
+        let nlri2: Nlri = octets.into();
+        assert_eq!(nlri, nlri2);
+    }
+
+    #[test]
+    fn test_mpnlri_vec_conversion_ipv6() {
+        let af = AddressFamily {
+            afi: Afi::Ipv6,
+            safi: Safi::NLRIUnicast,
+        };
+        let nh = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let net = IpNet::V6(Ipv6Net::new(Ipv6Addr::LOCALHOST, 128).unwrap());
+        let nlri = Nlri { net };
+        let mpnlri = Mpnlri {
+            af,
+            nh,
+            nlris: vec![nlri.clone()],
+        };
+        let bytes: Vec<u8> = mpnlri.clone().into();
+        let mpnlri2: Mpnlri = bytes.into();
+        assert_eq!(mpnlri.af, mpnlri2.af);
+        assert_eq!(mpnlri.nlris, mpnlri2.nlris);
+        assert_eq!(mpnlri.nh, mpnlri2.nh);
+    }
+
+    #[test]
+    fn test_mpunlri_vec_conversion_ipv4() {
+        let af = AddressFamily {
+            afi: Afi::Ipv4,
+            safi: Safi::NLRIUnicast,
+        };
+        let net = IpNet::V4(Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 8).unwrap());
+        let nlri = Nlri { net };
+        let mpunlri = Mpunlri {
+            af,
+            nlris: vec![nlri.clone()],
+        };
+        let bytes: Vec<u8> = mpunlri.clone().into();
+        let mpunlri2: Mpunlri = bytes.into();
+        assert_eq!(mpunlri.af, mpunlri2.af);
+        assert_eq!(mpunlri.nlris, mpunlri2.nlris);
+    }
 }
