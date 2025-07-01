@@ -7,36 +7,48 @@ services:
       dockerfile: Dockerfile.ubgp
     networks:
       net1:
-        ipv4_address: 1.1.1.1
-        ipv6_address: "2001:1:dead:beef::1"
+        ipv4_address: 1.1.1.254
+        ipv6_address: "2001:1:dead:beef::6"
       net2:
-        ipv4_address: 2.2.2.1
-        ipv6_address: "2001:2:dead:beef::1"
-    cap_add: [NET_ADMIN]
+        ipv4_address: 2.2.2.254
+        ipv6_address: "2001:2:dead:beef::6"
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.all.disable_ipv6=0
     volumes:
       - ./ubgpd.conf:/etc/ubgpd.conf
 
   gobgp:
-    image: osrg/gobgp
+    image: smorris76/gobgp-containerlab
     networks:
       net1:
         ipv4_address: 1.1.1.2
         ipv6_address: "2001:1:dead:beef::2"
-    cap_add: [NET_ADMIN]
+    environment:
+      INTERFACE_CONFIG: '{"interfaces":[{"name":"eth0","ip":"1.1.1.2/24"},{"name":"eth0","ip":"2001:1:dead:beef::2/64"}]}'
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.all.disable_ipv6=0
     volumes:
-      - ./gobgp.conf:/etc/gobgp/gobgp.conf
+      - ./gobgp.conf:/etc/gobgp/gobgpd.conf
 
   frr:
-    image: frrouting/frr:v8.5.1
+    image: frrouting/frr:latest
     networks:
       net2:
         ipv4_address: 2.2.2.3
         ipv6_address: "2001:2:dead:beef::3"
-    cap_add: [NET_ADMIN]
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
     sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
       - net.ipv6.conf.all.disable_ipv6=0
     volumes:
-      - ./frr.conf:/etc/frr/frr.conf
+      - ./frr:/etc/frr
 
 networks:
   net1:

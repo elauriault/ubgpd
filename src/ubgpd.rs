@@ -37,12 +37,10 @@ async fn main() -> Result<()> {
     config.hold_time = config.hold_time.or(Some(config::BGP_DEFAULT_HOLD_TIME));
     config.port = config.port.or(Some(config::BGP_DEFAULT_PORT));
 
-    config.localip = config.localip.or_else(|| {
-        Some(
-            config::BGP_DEFAULT_LOCAL_IP
-                .parse()
-                .expect("Failed to parse default IP"),
-        ) // Consider handling this error better
+    config.localips = config.localips.or_else(|| {
+        Some(vec![config::BGP_DEFAULT_LOCAL_IP
+            .parse()
+            .expect("Failed to parse default IP")]) // Consider handling this error better
     });
 
     config.families = config.families.or_else(|| {
@@ -58,7 +56,7 @@ async fn main() -> Result<()> {
         config.asn,
         u32::from(config.rid),
         config.hold_time.unwrap(),
-        config.localip.unwrap(),
+        config.localips.unwrap(),
         config.port.unwrap(),
         families.unwrap(),
     )));

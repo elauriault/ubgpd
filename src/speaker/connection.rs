@@ -55,15 +55,15 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
 
 /// Listen for incoming BGP connections.
 pub async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) -> Result<()> {
-    let local_ip;
+    let local_ips;
     let local_port;
     {
         let s = speaker.lock().await;
-        local_ip = s.local_ip;
+        local_ips = s.local_ips.clone();
         local_port = s.local_port;
     }
 
-    let socket_addr = format!("{}:{}", local_ip, local_port);
+    let socket_addr = format!("{}:{}", local_ips[0], local_port);
     let listener = TcpListener::bind(&socket_addr)
         .await
         .context(format!("Failed to bind BGP listener to {}", socket_addr))?;
