@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y \
   iproute2 \
   iputils-ping \
   net-tools \
+  tcpdump \
+  nmap \
   libssl3 \
   && rm -rf /var/lib/apt/lists/*
 
@@ -43,7 +45,7 @@ EXPOSE 179/tcp
 EXPOSE 50051/tcp
 
 # Use syslog or file-based logging
-ENV RUST_LOG=info
+ENV RUST_LOG=debug
 
 # Default command
 CMD ["ubgpd", "--config", "/etc/ubgpd.conf"]

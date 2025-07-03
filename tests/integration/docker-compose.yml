@@ -19,6 +19,8 @@ services:
       - net.ipv6.conf.all.disable_ipv6=0
     volumes:
       - ./ubgpd.conf:/etc/ubgpd.conf
+    expose:
+      - "179"
 
   gobgp:
     image: smorris76/gobgp-containerlab
@@ -35,6 +37,8 @@ services:
       - net.ipv6.conf.all.disable_ipv6=0
     volumes:
       - ./gobgp.conf:/etc/gobgp/gobgpd.conf
+    expose:
+      - "179"
 
   frr:
     image: frrouting/frr:latest
@@ -49,6 +53,8 @@ services:
       - net.ipv6.conf.all.disable_ipv6=0
     volumes:
       - ./frr:/etc/frr
+    expose:
+      - "179"
 
 networks:
   net1:
