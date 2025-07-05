@@ -18,22 +18,29 @@ impl From<bgp::BGPCapabilities> for Capabilities {
     fn from(src: bgp::BGPCapabilities) -> Self {
         let mut capabilities = Capabilities::default();
         let mut afs = vec![];
+
         for c in src.params {
+            log::debug!("Processing capability: {:?}", c);
+
             match c.capability_code {
                 bgp::BGPCapabilityCode::Multiprotocol => {
-                    if c.capability_length != 4 {
-                        panic!("Unexpected length of BGP capability");
+                    if c.capability_length >= 4 {
+                        let mut afi = [0u8; 2];
+                        let mut safi = [0u8; 1];
+                        afi.copy_from_slice(&c.capability_value[0..2]);
+                        safi.copy_from_slice(&c.capability_value[3..4]); // Skip reserved byte
+
+                        let afi = u16::from_be_bytes(afi);
+                        let safi = u8::from_be_bytes(safi);
+
+                        if let (Some(afi), Some(safi)) =
+                            (bgp::Afi::from_u16(afi), bgp::Safi::from_u8(safi))
+                        {
+                            let af = bgp::AddressFamily { afi, safi };
+                            afs.push(af.clone());
+                            log::debug!("Added address family: {:?}", af);
+                        }
                     }
-                    let mut afi = [0u8; 2];
-                    let mut safi = [0u8; 1];
-                    afi.copy_from_slice(&c.capability_value[0..2]);
-                    safi.copy_from_slice(&c.capability_value[3..4]);
-                    let afi = u16::from_be_bytes(afi);
-                    let safi = u8::from_be_bytes(safi);
-                    let afi = FromPrimitive::from_u16(afi).unwrap();
-                    let safi = FromPrimitive::from_u8(safi).unwrap();
-                    let af = bgp::AddressFamily { afi, safi };
-                    afs.push(af);
                 }
                 bgp::BGPCapabilityCode::RouteRefresh => capabilities.route_refresh = true,
                 bgp::BGPCapabilityCode::ExtendedNextHopEncoding => {
@@ -52,9 +59,16 @@ impl From<bgp::BGPCapabilities> for Capabilities {
                     let asn = u32::from_be_bytes(v);
                     capabilities.four_octect_asn = Some(asn);
                 }
+                other => {
+                    log::debug!("Ignoring unsupported BGP capability: {:?}", other);
+                }
             }
         }
-        capabilities.multiprotocol = Some(afs.into_iter().unique().collect());
+        if !afs.is_empty() {
+            capabilities.multiprotocol = Some(afs.into_iter().unique().collect());
+        }
+
+        log::debug!("Parsed capabilities: {:?}", capabilities);
 
         capabilities
     }

@@ -28,7 +28,15 @@ pub async fn connect(
     speaker: Arc<Mutex<speaker::BGPSpeaker>>,
     neighbor: Arc<Mutex<BGPNeighbor>>,
 ) -> Result<()> {
-    let (remote_addr, local_ip, local_asn, ribtx) = {
+    {
+        // Clone the speaker's fully populated RIB TX channels
+        let mut n = neighbor.lock().await;
+        let sp = speaker.lock().await;
+        n.ribtx = sp.ribtx.clone();
+        log::debug!("Neighbor ribtx set: {:?}", n.ribtx.keys());
+    }
+    // Extract remote address, local_ip, and local_asn from the neighbor
+    let (remote_addr, local_ip, local_asn) = {
         let n = neighbor.lock().await;
         let remote_ip = n
             .remote_ip
@@ -36,13 +44,16 @@ pub async fn connect(
         let remote_port = n
             .remote_port
             .ok_or_else(|| anyhow!("Remote port not configured"))?;
-        let remote_addr = format!("{}:{}", remote_ip, remote_port);
-        (remote_addr, n.local_ip, n.local_asn, n.ribtx.clone())
+        (
+            format!("{}:{}", remote_ip, remote_port),
+            n.local_ip,
+            n.local_asn,
+        )
     };
 
     // Attempt connection with retry logic
     let socket = match TcpStream::connect(&remote_addr).await {
-        Ok(socket) => socket,
+        Ok(sock) => sock,
         Err(e) => {
             log::error!("Failed to connect to {}: {}", remote_addr, e);
             // Update neighbor state to Idle on connection failure
@@ -51,27 +62,30 @@ pub async fn connect(
                 n.attributes.state = BGPState::Idle;
                 n.attributes.connect_retry_counter += 1;
             }
-            // Schedule retry if appropriate
-            let connect_retry_time = {
+            // Schedule retry
+            let retry = {
                 let n = neighbor.lock().await;
                 n.attributes.connect_retry_time
             };
-            tokio::time::sleep(Duration::from_secs(connect_retry_time as u64)).await;
+            tokio::time::sleep(Duration::from_secs(retry as u64)).await;
             return Err(anyhow!("Connection failed: {}", e));
         }
     };
 
-    // Update neighbor with connection details
+    // Update neighbor with connection details and inject RIB-TX
     {
         let mut n = neighbor.lock().await;
+
+        // Transition to Connect state
         n.attributes.state = BGPState::Connect;
+
+        // Record the local bind address
         let local_addr = socket.local_addr().context("Failed to get local address")?;
         n.local_ip = Some(local_addr.ip());
         n.local_port = Some(local_addr.port());
-        n.ribtx = ribtx;
     }
 
-    // Spawn FSM handler
+    // Spawn the per-connection FSM task
     let speaker_clone = speaker.clone();
     let neighbor_clone = neighbor.clone();
     tokio::spawn(async move {

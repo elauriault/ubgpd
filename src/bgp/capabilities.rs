@@ -142,6 +142,14 @@ pub enum BGPCapabilityCode {
     ExtendedNextHopEncoding = 5,
     GracefulRestart = 64,
     FourOctectASN = 65,
+    DynamicCapability = 67,
+    MultisessionBGP = 68,
+    AddPath = 69,
+    EnhancedRouteRefresh = 70,
+    LongLivedGracefulRestart = 71,
+    FQDNCapability = 73,
+    #[doc(hidden)]
+    Unknown = 255,
 }
 
 #[derive(Debug, Clone)]
@@ -153,14 +161,46 @@ pub struct BGPCapability {
 
 impl From<Vec<u8>> for BGPCapability {
     fn from(src: Vec<u8>) -> Self {
-        let mut code = [0u8; 1];
-        code.copy_from_slice(&src[0..1]);
-        let code = u8::from_be_bytes(code);
+        if src.len() < 2 {
+            log::warn!("Capability buffer too short: {:?}", src);
+            return BGPCapability {
+                capability_code: BGPCapabilityCode::Multiprotocol, // fallback
+                capability_length: 0,
+                capability_value: vec![],
+            };
+        }
+
+        let code = src[0];
+        let length = src[1] as usize;
+
+        let cap_code = match BGPCapabilityCode::from_u8(code) {
+            Some(c) => c,
+            None => {
+                log::warn!("Unrecognized capability code: {} ({} bytes)", code, length);
+                return BGPCapability {
+                    capability_code: BGPCapabilityCode::Multiprotocol, // dummy default to parse
+                    capability_length: 0,
+                    capability_value: vec![],
+                };
+            }
+        };
+
+        let value = if src.len() >= 2 + length {
+            src[2..2 + length].to_vec()
+        } else {
+            log::warn!(
+                "Capability code {} claims length {}, but buffer is only {} bytes",
+                code,
+                length,
+                src.len()
+            );
+            vec![]
+        };
 
         BGPCapability {
-            capability_code: BGPCapabilityCode::from_u8(code).unwrap(),
-            capability_length: src[2..].to_vec().len(),
-            capability_value: src[2..].to_vec(),
+            capability_code: cap_code,
+            capability_length: length,
+            capability_value: value,
         }
     }
 }
@@ -198,21 +238,41 @@ pub struct BGPCapabilities {
 
 impl From<BGPOptionalParameters> for BGPCapabilities {
     fn from(src: BGPOptionalParameters) -> Self {
-        let p = src
-            .params
-            .iter()
-            .find(|x| x.param_type == BGPOptionalParameterType::Capability);
-        match p {
-            None => BGPCapabilities::default(),
-            Some(_) => {
-                // Extract capabilities from parameter value
-                // This is a complex conversion, see original code
-                let caps_params = Vec::new();
-                // Extract the capabilities
-                BGPCapabilities {
-                    params: caps_params,
+        let mut all_caps = Vec::new();
+
+        for param in src.params {
+            if param.param_type == BGPOptionalParameterType::Capability {
+                // Parse all capabilities from this parameter
+                let mut offset = 0;
+                let data = &param.param_value;
+
+                while offset < data.len() {
+                    // Need at least 2 bytes for code and length
+                    if offset + 2 > data.len() {
+                        log::warn!("Incomplete capability at offset {}", offset);
+                        break;
+                    }
+
+                    let cap_code = data[offset];
+                    let cap_len = data[offset + 1] as usize;
+
+                    // Check if we have enough data for this capability
+                    if offset + 2 + cap_len > data.len() {
+                        log::warn!("Capability length {} exceeds available data", cap_len);
+                        break;
+                    }
+
+                    // Extract this capability
+                    let cap_data = data[offset..offset + 2 + cap_len].to_vec();
+                    let cap: BGPCapability = cap_data.into();
+                    all_caps.push(cap);
+
+                    // Move to next capability
+                    offset += 2 + cap_len;
                 }
             }
         }
+
+        BGPCapabilities { params: all_caps }
     }
 }

@@ -12,45 +12,105 @@ use crate::neighbor;
 
 use super::types::BGPSpeaker;
 
-/// Add an incoming BGP connection.
 pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, addr: SocketAddr) {
-    use crate::neighbor;
+    log::info!("New incoming connection from {}", addr);
 
-    log::info!("A new connection!");
-    let n;
-    {
-        let mut s = speaker.lock().await;
-        let remote_asn = None;
-        let local_addr = socket.local_addr().unwrap();
-        let local_ip = local_addr.ip();
-        let local_port = local_addr.port();
-        let local_asn = s.local_asn;
-        let local_rid = s.router_id;
-        let remote_ip = addr.ip();
-        let remote_port = addr.port();
-        let hold_time = s.hold_time;
-        let connect_retry_time = 120; // This is a default value
+    let remote_ip = addr.ip();
+    let remote_port = addr.port();
 
-        {
-            let speaker = speaker.lock().await;
-            n = Arc::new(Mutex::new(neighbor::BGPNeighbor::new(
-                Some(local_ip),
-                Some(local_port),
-                local_asn,
-                local_rid,
-                Some(remote_ip),
-                Some(remote_port),
-                remote_asn,
-                hold_time,
-                connect_retry_time,
-                neighbor::BGPState::Active,
-                Some(speaker.families.clone()),
-                speaker.ribtx.clone(),
-            )));
+    // First, check if we have a configured neighbor matching this IP
+    let matched_neighbor = {
+        let s = speaker.lock().await;
+
+        // Find a configured neighbor with matching IP
+        s.neighbors
+            .iter()
+            .find(|n| {
+                if let Ok(neighbor) = n.try_lock() {
+                    neighbor.remote_ip == Some(remote_ip)
+                } else {
+                    // If we can't get the lock, skip this neighbor
+                    // (it might be in use by another connection attempt)
+                    false
+                }
+            })
+            .cloned() // Clone the Arc<Mutex<BGPNeighbor>>
+    };
+
+    match matched_neighbor {
+        Some(existing_neighbor) => {
+            // We found a configured neighbor - check its state
+            let should_accept = {
+                let n = existing_neighbor.lock().await;
+
+                log::info!(
+                    "Found configured neighbor for {} (ASN: {:?}, State: {:?})",
+                    remote_ip,
+                    n.remote_asn,
+                    n.attributes.state
+                );
+
+                // Only accept if not already connected
+                match n.attributes.state {
+                    neighbor::BGPState::Idle
+                    | neighbor::BGPState::Active
+                    | neighbor::BGPState::Connect => true,
+                    neighbor::BGPState::OpenSent
+                    | neighbor::BGPState::OpenConfirm
+                    | neighbor::BGPState::Established => {
+                        log::warn!(
+                            "Rejecting connection from {} - already in state {:?}",
+                            remote_ip,
+                            n.attributes.state
+                        );
+                        false
+                    }
+                }
+            };
+
+            if should_accept {
+                // Update the existing neighbor with connection details
+                {
+                    let mut n = existing_neighbor.lock().await;
+                    let local_addr = socket.local_addr().unwrap();
+                    n.local_ip = Some(local_addr.ip());
+                    n.local_port = Some(local_addr.port());
+                    n.attributes.state = neighbor::BGPState::Active;
+                    log::info!(
+                        "Using existing neighbor config for passive connection from {}",
+                        remote_ip
+                    );
+                }
+
+                // Start FSM with the existing neighbor
+                tokio::spawn(async move {
+                    if let Err(e) = neighbor::fsm_tcp(existing_neighbor, socket, speaker).await {
+                        log::error!("FSM error for {}: {}", remote_ip, e);
+                    }
+                });
+            } else {
+                // Connection already exists - close this one
+                log::info!("Closing duplicate connection from {}", remote_ip);
+                drop(socket);
+            }
         }
-        s.neighbors.push(n.clone());
+        None => {
+            // No configured neighbor found
+            log::warn!(
+                "Rejecting connection from unconfigured peer {}:{}",
+                remote_ip,
+                remote_port
+            );
+
+            // Optionally, you could send a NOTIFICATION message before closing
+            // For now, just close the connection
+            drop(socket);
+
+            // Alternative: If you want to support dynamic neighbors, you could create
+            // a new neighbor entry here, but that's generally not recommended for
+            // security reasons in production BGP implementations
+        }
     }
-    tokio::spawn(async move { neighbor::fsm_tcp(n, socket, speaker.clone()).await });
 }
 
 /// Listen for incoming BGP connections.
