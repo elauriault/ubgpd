@@ -349,28 +349,35 @@ pub async fn collision_detection(
     message: bgp::BGPOpenMessage,
     speaker: Arc<Mutex<speaker::BGPSpeaker>>,
 ) -> bool {
-    let s = speaker.lock().await;
-    let ns = s.neighbors.clone();
+    let ns;
+    let rid;
+    {
+        let s = speaker.lock().await;
+        ns = s.neighbors.clone();
+        rid = s.router_id;
+    }
+    log::debug!("Checking collision for bgp::BGPOpenMessage");
     for n in ns {
         let n = n.lock().await;
-        log::debug!("Checking collision for {:?}", n);
         let tx = n.tx.clone();
         match tx {
             None => {}
             Some(t) => match n.attributes.state {
                 BGPState::OpenConfirm => {
                     if n.remote_rid == Some(message.router_id) {
-                        if n.remote_rid < Some(s.router_id) {
+                        if n.remote_rid < Some(rid) {
                             let _ = t.send(Event::OpenCollisionDump).await;
                         }
+                        log::debug!("Collision detected!");
                         return true;
                     }
                 }
                 BGPState::OpenSent => {
                     if n.remote_rid == Some(message.router_id) {
-                        if n.remote_rid < Some(s.router_id) {
+                        if n.remote_rid < Some(rid) {
                             let _ = t.send(Event::OpenCollisionDump).await;
                         }
+                        log::debug!("Collision detected!");
                         return true;
                     }
                 }
@@ -378,6 +385,7 @@ pub async fn collision_detection(
             },
         }
     }
+    log::debug!("No collision detected bgp::BGPOpenMessage!");
     false
 }
 
@@ -385,15 +393,28 @@ pub async fn validate_open(
     message: bgp::BGPOpenMessage,
     neighbor: Arc<Mutex<BGPNeighbor>>,
 ) -> bool {
+    log::debug!("bgp::BGPOpenMessage validation in progress");
     let n = neighbor.lock().await;
-    if n.remote_asn != Some(message.asn) {
-        log::debug!(
-            "n.remote_asn: {} != message.asn:{}",
-            n.remote_asn.unwrap(),
-            message.asn
-        );
-        return false;
+    match n.remote_asn {
+        Some(configured_asn) => {
+            if configured_asn != message.asn {
+                log::debug!(
+                    "n.remote_asn: {} != message.asn:{}",
+                    configured_asn,
+                    message.asn
+                );
+                return false;
+            }
+        }
+        None => {
+            log::debug!(
+                "No remote ASN configured - accepting ASN {} from peer",
+                message.asn
+            );
+        }
     }
+
+    log::debug!("bgp::BGPOpenMessage has been validated");
     true
 }
 
@@ -401,6 +422,7 @@ pub async fn update_from_open(message: bgp::BGPOpenMessage, neighbor: Arc<Mutex<
     let mut n = neighbor.lock().await;
     n.attributes.hold_time = message.hold_time;
     n.remote_rid = Some(message.router_id);
+    n.remote_asn = Some(message.asn);
     n.attributes.state = BGPState::OpenConfirm;
     let caps: bgp::BGPCapabilities = message.opt_params.into();
     n.capabilities_received = caps.into();
@@ -498,11 +520,15 @@ pub async fn handle_update(
     {
         let nb = nb.lock().await;
         msg.rid = nb.remote_rid.unwrap();
-        let _ = nb
-            .ribtx
-            .get(&af)
-            .unwrap()
-            .send(speaker::RibEvent::UpdateRoutes(msg))
-            .await;
+        if let Some(tx) = nb.ribtx.get(&af) {
+            let _ = tx.send(speaker::RibEvent::UpdateRoutes(msg)).await;
+        } else {
+            log::warn!(
+                "No RIB TX channel found for AFI/SAFI {:?} from peer {:?}",
+                af,
+                nb.remote_ip
+            );
+            return;
+        }
     }
 }
