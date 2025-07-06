@@ -12,10 +12,10 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Set up Rust toolchain
-        uses: actions/setup-rust@v2
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          rust-version: stable
+          toolchain: stable
           cache: true
 
       - name: Build ubgpd Docker image
