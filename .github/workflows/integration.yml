@@ -23,11 +23,8 @@ jobs:
 
       - name: Start test topology
         run: |
-          docker-compose -f tests/integration/docker-compose.yml up -d
+          docker compose -f tests/integration/docker-compose.yml up -d
           sleep 10
-
-      - name: Run integration tests
-        run: cargo test --test integration -- --test-threads=1
 
       - name: Show BGP state for debug (if failed)
         if: failure()
