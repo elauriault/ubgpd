@@ -133,7 +133,7 @@ impl From<Vec<u8>> for BGPOptionalParameters {
     }
 }
 
-#[derive(Debug, Clone, FromPrimitive)]
+#[derive(Debug, Clone, FromPrimitive, PartialEq)]
 #[repr(u8)]
 pub enum BGPCapabilityCode {
     Multiprotocol = 1,
@@ -274,5 +274,145 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
         }
 
         BGPCapabilities { params: all_caps }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bgp_optional_parameter_default() {
+        let param = BGPOptionalParameter::default();
+        assert_eq!(param.param_type, BGPOptionalParameterType::Capability);
+        assert!(param.param_length > 0);
+    }
+
+    #[test]
+    fn test_bgp_optional_parameter_serialization() {
+        let param = BGPOptionalParameter {
+            param_type: BGPOptionalParameterType::Capability,
+            param_length: 4,
+            param_value: vec![1, 2, 3, 4],
+        };
+        let bytes: Vec<u8> = param.clone().into();
+        assert_eq!(bytes[0], BGPOptionalParameterType::Capability as u8);
+        assert_eq!(bytes[1], 4);
+        assert_eq!(&bytes[2..], &[1, 2, 3, 4]);
+
+        let parsed: BGPOptionalParameter = bytes.into();
+        assert_eq!(parsed.param_type, param.param_type);
+        assert_eq!(parsed.param_value, param.param_value);
+    }
+
+    #[test]
+    fn test_bgp_optional_parameters() {
+        let param1 = BGPOptionalParameter {
+            param_type: BGPOptionalParameterType::Capability,
+            param_length: 2,
+            param_value: vec![1, 2],
+        };
+        let param2 = BGPOptionalParameter {
+            param_type: BGPOptionalParameterType::Capability,
+            param_length: 3,
+            param_value: vec![3, 4, 5],
+        };
+        let params = BGPOptionalParameters::new(vec![param1, param2]);
+        assert_eq!(params.len, 9); // 2+2 + 2+3
+
+        let bytes: Vec<u8> = params.clone().into();
+        let parsed: BGPOptionalParameters = bytes.into();
+        assert_eq!(parsed.params.len(), 2);
+    }
+
+    #[test]
+    fn test_bgp_capability_multiprotocol() {
+        let mp = BGPCapabilityMultiprotocol {
+            afi: Afi::Ipv4,
+            safi: Safi::NLRIUnicast,
+        };
+        let bytes: Vec<u8> = mp.into();
+        assert_eq!(bytes.len(), 4);
+        assert_eq!(&bytes[0..2], &[0, 1]); // IPv4
+        assert_eq!(bytes[2], 0); // Reserved
+        assert_eq!(bytes[3], 1); // Unicast
+    }
+
+    #[test]
+    fn test_bgp_capability_serialization() {
+        let cap = BGPCapability {
+            capability_code: BGPCapabilityCode::RouteRefresh,
+            capability_length: 0,
+            capability_value: vec![],
+        };
+        let bytes: Vec<u8> = cap.clone().into();
+        assert_eq!(bytes[0], BGPCapabilityCode::RouteRefresh as u8);
+        assert_eq!(bytes[1], 0);
+
+        let parsed: BGPCapability = bytes.into();
+        assert_eq!(parsed.capability_code, cap.capability_code);
+    }
+
+    #[test]
+    fn test_bgp_capabilities_from_optional_parameters() {
+        // Test parsing multiple capabilities from a single parameter
+        let mut cap_data = vec![];
+
+        // Add Route Refresh capability (code 2, length 0)
+        cap_data.extend_from_slice(&[2, 0]);
+
+        // Add Multiprotocol capability (code 1, length 4)
+        cap_data.extend_from_slice(&[1, 4, 0, 1, 0, 1]); // IPv4 Unicast
+
+        // Add Four-octet ASN capability (code 65, length 4)
+        cap_data.extend_from_slice(&[65, 4, 0, 0, 0, 123]);
+
+        let param = BGPOptionalParameter {
+            param_type: BGPOptionalParameterType::Capability,
+            param_length: cap_data.len(),
+            param_value: cap_data,
+        };
+
+        let opt_params = BGPOptionalParameters {
+            len: param.param_length + 2,
+            params: vec![param],
+        };
+
+        let caps: BGPCapabilities = opt_params.into();
+        assert_eq!(caps.params.len(), 3);
+
+        // Verify each capability
+        assert_eq!(
+            caps.params[0].capability_code,
+            BGPCapabilityCode::RouteRefresh
+        );
+        assert_eq!(
+            caps.params[1].capability_code,
+            BGPCapabilityCode::Multiprotocol
+        );
+        assert_eq!(
+            caps.params[2].capability_code,
+            BGPCapabilityCode::FourOctectASN
+        );
+    }
+
+    #[test]
+    fn test_bgp_capabilities_partial_data() {
+        // Test handling of incomplete capability data
+        let cap_data = vec![1, 4, 0, 1]; // Incomplete multiprotocol capability
+
+        let param = BGPOptionalParameter {
+            param_type: BGPOptionalParameterType::Capability,
+            param_length: cap_data.len(),
+            param_value: cap_data,
+        };
+
+        let opt_params = BGPOptionalParameters {
+            len: param.param_length + 2,
+            params: vec![param],
+        };
+
+        let caps: BGPCapabilities = opt_params.into();
+        assert_eq!(caps.params.len(), 0); // Should skip the incomplete capability
     }
 }
