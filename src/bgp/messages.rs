@@ -157,7 +157,11 @@ impl BGPUpdateMessage {
     }
 
     pub fn new() -> Result<BGPUpdateMessage, String> {
-        BGPUpdateMessageBuilder::default().build()
+        BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(vec![])
+            .nlri(vec![])
+            .build()
     }
 }
 
