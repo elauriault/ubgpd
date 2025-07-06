@@ -89,49 +89,53 @@ pub enum UpdateSubCode {
 pub enum BgpValidationError {
     #[error("Message too short: got {actual}, minimum {minimum}")]
     MessageTooShort { actual: usize, minimum: usize },
-    
+
     #[error("Message too long: got {actual}, maximum {maximum}")]
     MessageTooLong { actual: usize, maximum: usize },
-    
+
     #[error("Invalid marker: expected all 0xFF")]
     InvalidMarker,
-    
+
     #[error("Invalid message type: {0}")]
     InvalidMessageType(u8),
-    
+
     #[error("Invalid BGP version: got {actual}, expected {expected}")]
     InvalidVersion { actual: u8, expected: u8 },
-    
+
     #[error("Invalid AS number: {0}")]
     InvalidAsn(u16),
-    
+
     #[error("Invalid hold time: {0}")]
     InvalidHoldTime(u16),
-    
+
     #[error("Invalid router ID: {0}")]
     InvalidRouterId(u32),
-    
+
     #[error("Invalid optional parameter length: {0}")]
     InvalidOptionalParameterLength(u8),
-    
+
     #[error("Invalid path attribute length: {0}")]
     InvalidPathAttributeLength(usize),
-    
+
     #[error("Invalid NLRI prefix length: {0}")]
     InvalidNlriPrefixLength(u8),
-    
+
     #[error("Invalid buffer bounds: offset {offset}, length {length}, buffer size {buffer_size}")]
-    InvalidBufferBounds { offset: usize, length: usize, buffer_size: usize },
-    
+    InvalidBufferBounds {
+        offset: usize,
+        length: usize,
+        buffer_size: usize,
+    },
+
     #[error("Missing required path attribute: {0}")]
     MissingRequiredAttribute(String),
-    
+
     #[error("Malformed AS_PATH: {0}")]
     MalformedAsPath(String),
-    
+
     #[error("Invalid next hop: {0}")]
     InvalidNextHop(String),
-    
+
     #[error("Invalid capability: {0}")]
     InvalidCapability(String),
 }
@@ -139,48 +143,59 @@ pub enum BgpValidationError {
 impl BgpValidationError {
     pub fn to_notification_codes(&self) -> (ErrorCode, u8) {
         match self {
-            BgpValidationError::MessageTooShort { .. } |
-            BgpValidationError::MessageTooLong { .. } => {
-                (ErrorCode::MessageHeader, HeaderSubCode::BadMessageLength as u8)
-            }
-            BgpValidationError::InvalidMarker => {
-                (ErrorCode::MessageHeader, HeaderSubCode::ConnectionNotSynchronized as u8)
-            }
-            BgpValidationError::InvalidMessageType(_) => {
-                (ErrorCode::MessageHeader, HeaderSubCode::BadMessageType as u8)
-            }
-            BgpValidationError::InvalidVersion { .. } => {
-                (ErrorCode::OpenMessage, OpenSubCode::UnsupportedVersionNumber as u8)
-            }
+            BgpValidationError::MessageTooShort { .. }
+            | BgpValidationError::MessageTooLong { .. } => (
+                ErrorCode::MessageHeader,
+                HeaderSubCode::BadMessageLength as u8,
+            ),
+            BgpValidationError::InvalidMarker => (
+                ErrorCode::MessageHeader,
+                HeaderSubCode::ConnectionNotSynchronized as u8,
+            ),
+            BgpValidationError::InvalidMessageType(_) => (
+                ErrorCode::MessageHeader,
+                HeaderSubCode::BadMessageType as u8,
+            ),
+            BgpValidationError::InvalidVersion { .. } => (
+                ErrorCode::OpenMessage,
+                OpenSubCode::UnsupportedVersionNumber as u8,
+            ),
             BgpValidationError::InvalidAsn(_) => {
                 (ErrorCode::OpenMessage, OpenSubCode::BadPeerAS as u8)
             }
-            BgpValidationError::InvalidHoldTime(_) => {
-                (ErrorCode::OpenMessage, OpenSubCode::UnacceptableHoldTime as u8)
-            }
+            BgpValidationError::InvalidHoldTime(_) => (
+                ErrorCode::OpenMessage,
+                OpenSubCode::UnacceptableHoldTime as u8,
+            ),
             BgpValidationError::InvalidRouterId(_) => {
                 (ErrorCode::OpenMessage, OpenSubCode::BadBGPIdentifier as u8)
             }
-            BgpValidationError::InvalidOptionalParameterLength(_) |
-            BgpValidationError::InvalidCapability(_) => {
-                (ErrorCode::OpenMessage, OpenSubCode::UnsupportedOptionalParameter as u8)
-            }
-            BgpValidationError::InvalidPathAttributeLength(_) |
-            BgpValidationError::InvalidBufferBounds { .. } => {
-                (ErrorCode::UpdateMessage, UpdateSubCode::AttributeLengthError as u8)
-            }
-            BgpValidationError::InvalidNlriPrefixLength(_) => {
-                (ErrorCode::UpdateMessage, UpdateSubCode::InvalidNetworkField as u8)
-            }
-            BgpValidationError::MissingRequiredAttribute(_) => {
-                (ErrorCode::UpdateMessage, UpdateSubCode::MissingWellKnownAttribute as u8)
-            }
-            BgpValidationError::MalformedAsPath(_) => {
-                (ErrorCode::UpdateMessage, UpdateSubCode::MalformedASPATH as u8)
-            }
-            BgpValidationError::InvalidNextHop(_) => {
-                (ErrorCode::UpdateMessage, UpdateSubCode::InvalidNEXTHOPAttribute as u8)
-            }
+            BgpValidationError::InvalidOptionalParameterLength(_)
+            | BgpValidationError::InvalidCapability(_) => (
+                ErrorCode::OpenMessage,
+                OpenSubCode::UnsupportedOptionalParameter as u8,
+            ),
+            BgpValidationError::InvalidPathAttributeLength(_)
+            | BgpValidationError::InvalidBufferBounds { .. } => (
+                ErrorCode::UpdateMessage,
+                UpdateSubCode::AttributeLengthError as u8,
+            ),
+            BgpValidationError::InvalidNlriPrefixLength(_) => (
+                ErrorCode::UpdateMessage,
+                UpdateSubCode::InvalidNetworkField as u8,
+            ),
+            BgpValidationError::MissingRequiredAttribute(_) => (
+                ErrorCode::UpdateMessage,
+                UpdateSubCode::MissingWellKnownAttribute as u8,
+            ),
+            BgpValidationError::MalformedAsPath(_) => (
+                ErrorCode::UpdateMessage,
+                UpdateSubCode::MalformedASPATH as u8,
+            ),
+            BgpValidationError::InvalidNextHop(_) => (
+                ErrorCode::UpdateMessage,
+                UpdateSubCode::InvalidNEXTHOPAttribute as u8,
+            ),
         }
     }
 }
@@ -213,7 +228,7 @@ pub fn validate_nlri_prefix_length(prefix_len: u8, afi: &Afi) -> Result<(), BgpV
         Afi::Ipv4 => 32,
         Afi::Ipv6 => 128,
     };
-    
+
     if prefix_len > max_prefix_len {
         return Err(BgpValidationError::InvalidNlriPrefixLength(prefix_len));
     }
@@ -223,4 +238,30 @@ pub fn validate_nlri_prefix_length(prefix_len: u8, afi: &Afi) -> Result<(), BgpV
 pub fn is_extended_len(mask: u8) -> bool {
     let mask = mask >> 4;
     !matches!(mask & 0b0001, 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(MARKER.len(), 16);
+        assert!(MARKER.iter().all(|&b| b == 0xff));
+        assert_eq!(VERSION, 4);
+        assert_eq!(MIN_MESSAGE_LENGTH, 19);
+        assert_eq!(MAX_MESSAGE_LENGTH, 4096);
+    }
+
+    #[test]
+    fn test_validate_nlri_prefix_length() {
+        assert!(validate_nlri_prefix_length(0, &Afi::Ipv4).is_ok());
+        assert!(validate_nlri_prefix_length(32, &Afi::Ipv4).is_ok());
+        assert!(validate_nlri_prefix_length(33, &Afi::Ipv4).is_err());
+
+        assert!(validate_nlri_prefix_length(0, &Afi::Ipv6).is_ok());
+        assert!(validate_nlri_prefix_length(128, &Afi::Ipv6).is_ok());
+        assert!(validate_nlri_prefix_length(129, &Afi::Ipv6).is_err());
+    }
+
 }
