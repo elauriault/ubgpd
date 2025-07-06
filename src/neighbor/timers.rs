@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 use crate::neighbor::BGPState;
 

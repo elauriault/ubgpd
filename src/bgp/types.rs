@@ -297,7 +297,7 @@ pub fn safe_slice(buffer: &[u8], start: usize, end: usize) -> Result<&[u8], BgpV
     if start > end || end > buffer.len() {
         return Err(BgpValidationError::InvalidBufferBounds {
             offset: start,
-            length: end - start,
+            length: buffer.len().saturating_sub(start), // or just 0
             buffer_size: buffer.len(),
         });
     }
