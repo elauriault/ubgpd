@@ -7,11 +7,16 @@ on:
 jobs:
   integration:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up Rust
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
         uses: actions/setup-rust@v2
+        with:
+          rust-version: stable
+          cache: true
 
       - name: Build ubgpd Docker image
         run: docker build -t ubgp -f tests/integration/Dockerfile.ubgp .
