@@ -151,7 +151,7 @@ impl From<Vec<u8>> for Mpnlri {
         let mut addr = src[4..4 + nhl].to_vec();
 
         let nh: IpAddr;
-        let mut i = 4 + nhl + 1;
+        let mut i = 4 + nhl;
 
         let mut nlris: Vec<Nlri> = vec![];
         match afi {
