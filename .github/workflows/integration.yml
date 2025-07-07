@@ -28,20 +28,29 @@ jobs:
 
       - name: Check BGP neighbors status
         run: |
-          echo "=== BGP Neighbors Status ==="
+          echo "Neighbors:"
+          echo "  ubgp"
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 neighbors
+          echo "  frr"
           docker exec integration-frr-1 vtysh -c "show bgp summary"
-          docker exec integration-gobgp-1 vtysh -c "gobgp neighbor"
+          echo "  gobgp"
+          docker exec integration-gobgp-1 gobgp neighbor
           
       - name: Check RIB contents
         run: |
-          echo "=== IPv4 RIBs ==="
+          echo "IPv4 RIB:"
+          echo "  ubgp"
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 1 -s 1
+          echo "  frr"
           docker exec integration-frr-1 vtysh -c "show bgp ipv4"
+          echo "  gobgp"
           docker exec integration-gobgp-1 gobgp global rib -a ipv4
-          echo "=== IPv6 RIBs ==="
+        echo "IPv6 RIB:"
+          echo "  ubgp"
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 2 -s 1
+          echo "  frr"
           docker exec integration-frr-1 vtysh -c "show bgp ipv6"
+          echo "  gobgp"
           docker exec integration-gobgp-1 gobgp global rib -a ipv6
 
       - name: Collect logs on failure
