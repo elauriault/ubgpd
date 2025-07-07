@@ -1,6 +1,5 @@
 use bytes::{Buf, BytesMut};
 use num_traits::FromPrimitive;
-use std::io;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 

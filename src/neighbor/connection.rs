@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -147,13 +148,19 @@ pub async fn send_keepalive(
 }
 
 pub async fn read_message(
-    server: &mut Framed<tokio::net::TcpStream, bgp::BGPMessageCodec>,
+    server: &mut Framed<TcpStream, bgp::BGPMessageCodec>,
 ) -> Option<Result<bgp::Message, std::io::Error>> {
     match server.next().await {
-        Some(Ok(bytes)) => {
-            let message = bgp::Message::from(bytes);
-            Some(Ok(message))
-        }
+        Some(Ok(bytes)) => match bgp::Message::try_from(bytes) {
+            Ok(message) => Some(Ok(message)),
+            Err(e) => {
+                log::error!("Failed to parse BGP message: {}", e);
+                Some(Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("BGP message parse error: {}", e),
+                )))
+            }
+        },
         Some(Err(e)) => Some(Err(e)),
         None => None,
     }

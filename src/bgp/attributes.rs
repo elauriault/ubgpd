@@ -344,24 +344,9 @@ impl From<PathAttribute> for Vec<u8> {
     fn from(val: PathAttribute) -> Self {
         let mut buf: Vec<u8> = vec![];
 
-        let mut mask: u8 = 0;
-
-        if val.extended_length {
-            mask += 1;
-        }
-        if val.partial {
-            mask += 2;
-        }
-        if val.transitive {
-            mask += 4;
-        }
-        if val.optional {
-            mask += 8;
-        }
-
-        buf.push(mask << 4);
-        let code: u8;
+        // Prepare to build the attribute value first
         let mut bufval = Cursor::new(vec![]);
+        let code: u8;
 
         match val.value {
             PathAttributeValue::Origin(value) => {
@@ -429,11 +414,265 @@ impl From<PathAttribute> for Vec<u8> {
                 code = 16;
             }
         }
-        buf.push(code);
-        let mut val = bufval.into_inner();
-        let len = val.len() as u8;
-        buf.push(len);
-        buf.append(&mut val);
+
+        // Finalize value buffer and determine length
+        let mut val_bytes = bufval.into_inner();
+        let val_len = val_bytes.len();
+        let extended_length = val_len > 255;
+
+        // Build flags mask
+        let mut mask: u8 = 0;
+        if extended_length {
+            mask |= 0b0001;
+        }
+        if val.partial {
+            mask |= 0b0010;
+        }
+        if val.transitive {
+            mask |= 0b0100;
+        }
+        if val.optional {
+            mask |= 0b1000;
+        }
+
+        buf.push(mask << 4); // Flags
+        buf.push(code); // Attribute type code
+
+        if extended_length {
+            buf.push(((val_len >> 8) & 0xFF) as u8);
+            buf.push((val_len & 0xFF) as u8);
+        } else {
+            buf.push(val_len as u8);
+        }
+
+        buf.append(&mut val_bytes);
         buf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn test_origin_type_ordering() {
+        assert!(OriginType::Igp < OriginType::Egp);
+        assert!(OriginType::Egp < OriginType::Incomplete);
+    }
+
+    #[test]
+    fn test_aspath_segment_length() {
+        let segment = ASPATHSegment {
+            segment_type: ASPATHSegmentType::AsSequence,
+            as_list: vec![100, 200, 300],
+        };
+        assert_eq!(segment.len(), 3);
+
+        let set_segment = ASPATHSegment {
+            segment_type: ASPATHSegmentType::AsSet,
+            as_list: vec![100, 200, 300],
+        };
+        assert_eq!(set_segment.len(), 1);
+    }
+
+    #[test]
+    fn test_aspath_segment_to_vec() {
+        let segment = ASPATHSegment {
+            segment_type: ASPATHSegmentType::AsSequence,
+            as_list: vec![100, 200],
+        };
+        let bytes: Vec<u8> = segment.into();
+        assert_eq!(bytes[0], ASPATHSegmentType::AsSequence as u8);
+        assert_eq!(bytes[1], 2); // length
+        assert_eq!(&bytes[2..], &[0, 100, 0, 200]); // AS numbers in network byte order
+    }
+
+    #[test]
+    fn test_aspath_flatten() {
+        let aspath = vec![
+            ASPATHSegment {
+                segment_type: ASPATHSegmentType::AsSequence,
+                as_list: vec![100, 200],
+            },
+            ASPATHSegment {
+                segment_type: ASPATHSegmentType::AsSequence,
+                as_list: vec![300, 400],
+            },
+        ];
+        assert_eq!(aspath.flatten_aspath(), vec![100, 200, 300, 400]);
+    }
+
+    #[test]
+    fn test_path_attribute_origin() {
+        let attr = PathAttribute::origin(OriginType::Egp);
+        assert_eq!(attr.type_code, PathAttributeType::Origin);
+        assert!(!attr.optional);
+        assert!(attr.transitive);
+        assert!(!attr.partial);
+        assert!(!attr.extended_length);
+        assert_eq!(attr.value, PathAttributeValue::Origin(OriginType::Egp));
+    }
+
+    #[test]
+    fn test_path_attribute_aspath() {
+        let aspath = vec![ASPATHSegment {
+            segment_type: ASPATHSegmentType::AsSequence,
+            as_list: vec![100, 200],
+        }];
+        let attr = PathAttribute::aspath(aspath.clone());
+        assert_eq!(attr.type_code, PathAttributeType::AsPath);
+        assert_eq!(attr.value, PathAttributeValue::AsPath(aspath));
+    }
+
+    #[test]
+    fn test_path_attribute_nexthop() {
+        let nh = Ipv4Addr::new(192, 0, 2, 1);
+        let attr = PathAttribute::nexthop(nh);
+        assert_eq!(attr.type_code, PathAttributeType::NextHop);
+        assert_eq!(attr.value, PathAttributeValue::NextHop(nh));
+    }
+
+    #[test]
+    fn test_path_attribute_med() {
+        let attr = PathAttribute::med(100);
+        assert_eq!(attr.type_code, PathAttributeType::MultiExitDisc);
+        assert!(attr.optional);
+        assert!(!attr.transitive);
+        assert_eq!(attr.value, PathAttributeValue::MultiExitDisc(100));
+    }
+
+    #[test]
+    fn test_path_attribute_local_pref() {
+        let attr = PathAttribute::local_pref(200);
+        assert_eq!(attr.type_code, PathAttributeType::LocalPref);
+        assert!(attr.optional);
+        assert!(!attr.transitive);
+        assert_eq!(attr.value, PathAttributeValue::LocalPref(200));
+    }
+
+    #[test]
+    fn test_path_attribute_aggregator() {
+        let aggregator = Ipv4Addr::new(10, 0, 0, 1);
+        let attr = PathAttribute::aggregator(65000, aggregator);
+        assert_eq!(attr.type_code, PathAttributeType::Aggregator);
+        assert!(attr.optional);
+        assert!(attr.transitive);
+        match attr.value {
+            PathAttributeValue::Aggregator(agg) => {
+                assert_eq!(agg.last_as, 65000);
+                assert_eq!(agg.aggregator, aggregator);
+            }
+            _ => panic!("Wrong attribute value type"),
+        }
+    }
+
+    #[test]
+    fn test_path_attribute_serialization_origin() {
+        let attr = PathAttribute::origin(OriginType::Igp);
+        let bytes: Vec<u8> = attr.clone().into();
+        let parsed: PathAttribute = bytes.into();
+        assert_eq!(parsed, attr);
+    }
+
+    #[test]
+    fn test_path_attribute_serialization_aspath() {
+        let aspath = vec![
+            ASPATHSegment {
+                segment_type: ASPATHSegmentType::AsSequence,
+                as_list: vec![100, 200, 300],
+            },
+            ASPATHSegment {
+                segment_type: ASPATHSegmentType::AsSet,
+                as_list: vec![400, 500],
+            },
+        ];
+        let attr = PathAttribute::aspath(aspath);
+        let bytes: Vec<u8> = attr.clone().into();
+        let parsed: PathAttribute = bytes.into();
+        assert_eq!(parsed, attr);
+    }
+
+    // In src/bgp/attributes.rs, inside the #[cfg(test)] mod tests block
+
+    #[test]
+    fn test_path_attribute_extended_length() {
+        // Create an AS path that requires extended length
+        let mut large_as_list = vec![];
+        // To trigger extended length, the total value length must be > 255 bytes.
+        // For an AS_PATH segment, the size is:
+        // 1 byte (segment_type) + 1 byte (segment_length) + (number of ASNs * 2 bytes/ASN)
+        // So, 2 + (N * 2) > 255 => N * 2 > 253 => N > 126.5.
+        // We need at least 127 ASNs. Using 150 to be robust.
+        for i in 0..150 {
+            large_as_list.push(i as u16);
+        }
+        let aspath_segments = vec![ASPATHSegment {
+            segment_type: ASPATHSegmentType::AsSequence,
+            as_list: large_as_list,
+        }];
+
+        // Create the PathAttribute using the helper function.
+        // Note: The `aspath` constructor hardcodes `extended_length: false`.
+        // This field in the struct itself won't reflect the wire format's extended length flag.
+        let original_attr = PathAttribute::aspath(aspath_segments.clone());
+
+        // Serialize the attribute. The `Into<Vec<u8>>` implementation will correctly
+        // calculate and set the extended length flag in the byte stream based on its actual length.
+        let serialized_bytes: Vec<u8> = original_attr.clone().into();
+
+        // **Assertion from the original log, indicating `left: 0`**
+        // The original test assertion expected the extended length flag to be 1.
+        // This assert failed because for 100 ASNs, the flag was 0.
+        // With 150 ASNs, the flag should now correctly be 1.
+        assert_eq!(
+            serialized_bytes[0] >> 4 & 0b0001,
+            1,
+            "Extended length flag should be set to 1 in serialized bytes"
+        );
+
+        // **Additional checks for robust testing of extended length deserialization**
+        // Deserialize the bytes back into a PathAttribute
+        let parsed_attr: PathAttribute = serialized_bytes.into();
+
+        // Verify that the `extended_length` field in the deserialized struct is true
+        // (as it reflects the flag from the wire format, which we now ensured is set).
+        assert!(
+            parsed_attr.extended_length,
+            "Parsed PathAttribute should have extended_length set to true"
+        );
+
+        // Verify that the deserialized value matches the original value.
+        // We cannot directly compare `parsed_attr` with `original_attr` using `assert_eq!`
+        // because `original_attr.extended_length` (from constructor) is `false`,
+        // while `parsed_attr.extended_length` (from deserialization) is `true`.
+        // Instead, compare the significant parts.
+        assert_eq!(parsed_attr.type_code, original_attr.type_code);
+        assert_eq!(parsed_attr.optional, original_attr.optional);
+        assert_eq!(parsed_attr.transitive, original_attr.transitive);
+        assert_eq!(parsed_attr.partial, original_attr.partial);
+
+        // Ensure the actual AS path segments are identical
+        if let PathAttributeValue::AsPath(parsed_aspath) = parsed_attr.value {
+            if let PathAttributeValue::AsPath(original_aspath) = original_attr.value {
+                assert_eq!(
+                    parsed_aspath, original_aspath,
+                    "Deserialized AS Path should match original"
+                );
+            } else {
+                panic!("Original attribute value is not an AS Path");
+            }
+        } else {
+            panic!("Parsed attribute value is not an AS Path");
+        }
+    }
+
+    #[test]
+    fn test_is_transitive() {
+        assert!(PathAttribute::origin(OriginType::Igp).is_transitive());
+        assert!(PathAttribute::aspath(vec![]).is_transitive());
+        assert!(PathAttribute::nexthop(Ipv4Addr::new(0, 0, 0, 0)).is_transitive());
+        assert!(!PathAttribute::med(0).is_transitive());
+        assert!(!PathAttribute::local_pref(0).is_transitive());
     }
 }

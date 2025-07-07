@@ -7,7 +7,9 @@ use std::io::prelude::*;
 use std::io::Cursor;
 use std::mem::size_of;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 
+use crate::error::BgpError;
 use crate::neighbor;
 
 use super::attributes::*;
@@ -156,7 +158,11 @@ impl BGPUpdateMessage {
     }
 
     pub fn new() -> Result<BGPUpdateMessage, String> {
-        BGPUpdateMessageBuilder::default().build()
+        BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(vec![])
+            .nlri(vec![])
+            .build()
     }
 }
 
@@ -190,8 +196,18 @@ impl From<BGPUpdateMessage> for Vec<u8> {
     }
 }
 
-impl From<Vec<u8>> for BGPUpdateMessage {
-    fn from(src: Vec<u8>) -> Self {
+// In src/bgp/messages.rs, replace the existing From implementation with:
+
+impl TryFrom<Vec<u8>> for BGPUpdateMessage {
+    type Error = BgpError;
+
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
+        if src.len() < 2 {
+            return Err(BgpError::Message(
+                "Insufficient data for withdrawn routes length".to_string(),
+            ));
+        }
+
         let mut wdl = [0u8; 2];
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
@@ -263,7 +279,7 @@ impl From<Vec<u8>> for BGPUpdateMessage {
             .path_attributes(pa)
             .nlri(routes)
             .build()
-            .unwrap()
+            .map_err(|e| BgpError::Message(format!("Failed to build update message: {}", e)))
     }
 }
 
@@ -364,8 +380,10 @@ pub struct Message {
     pub body: BGPMessageBody,
 }
 
-impl From<Vec<u8>> for Message {
-    fn from(src: Vec<u8>) -> Self {
+impl TryFrom<Vec<u8>> for Message {
+    type Error = BgpError;
+
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut mtype = [0u8; 1];
         mtype.copy_from_slice(&src[18..19]);
         let mtype = MessageType::from_u8(mtype[0]).unwrap();
@@ -383,7 +401,7 @@ impl From<Vec<u8>> for Message {
                 BGPMessageBody::Open(msg)
             }
             MessageType::Update => {
-                let msg: BGPUpdateMessage = v.into();
+                let msg: BGPUpdateMessage = v.try_into()?; // Now this works!
                 BGPMessageBody::Update(msg)
             }
             MessageType::Notification => {
@@ -396,11 +414,11 @@ impl From<Vec<u8>> for Message {
             }
         };
 
-        MessageBuilder::default()
+        Ok(MessageBuilder::default()
             .header(header)
             .body(body)
             .build()
-            .unwrap()
+            .unwrap())
     }
 }
 
@@ -426,5 +444,157 @@ impl Message {
             .body(body)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::neighbor::Capabilities;
+
+    #[test]
+    fn test_bgp_open_message_new() {
+        let caps = Capabilities {
+            multiprotocol: Some(vec![AddressFamily {
+                afi: Afi::Ipv4,
+                safi: Safi::NLRIUnicast,
+            }]),
+            ..Default::default()
+        };
+        let open = BGPOpenMessage::new(65000, 16843009, 180, caps).unwrap();
+        assert_eq!(open.version, VERSION);
+        assert_eq!(open.asn, 65000);
+        assert_eq!(open.hold_time, 180);
+        assert_eq!(open.router_id, 16843009);
+    }
+
+    #[test]
+    fn test_bgp_open_message_serialization() {
+        let caps = Capabilities::default();
+        let open = BGPOpenMessage::new(65000, 16843009, 180, caps).unwrap();
+        let bytes: Vec<u8> = open.clone().into();
+        let parsed: BGPOpenMessage = bytes.into();
+
+        assert_eq!(parsed.version, open.version);
+        assert_eq!(parsed.asn, open.asn);
+        assert_eq!(parsed.hold_time, open.hold_time);
+        assert_eq!(parsed.router_id, open.router_id);
+    }
+
+    #[test]
+    fn test_bgp_update_message_empty() {
+        let update = BGPUpdateMessage::new().unwrap();
+        assert!(update.withdrawn_routes.is_empty());
+        assert!(update.path_attributes.is_empty());
+        assert!(update.nlri.is_empty());
+    }
+
+    #[test]
+    fn test_bgp_update_message_with_routes() {
+        let nlri1 = Nlri {
+            net: "10.0.0.0/24".parse().unwrap(),
+        };
+        let nlri2 = Nlri {
+            net: "10.1.0.0/24".parse().unwrap(),
+        };
+
+        let attr = PathAttribute::origin(OriginType::Igp);
+
+        let update = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![nlri1])
+            .path_attributes(vec![attr])
+            .nlri(vec![nlri2])
+            .build()
+            .unwrap();
+
+        assert_eq!(update.withdrawn_routes.len(), 1);
+        assert_eq!(update.path_attributes.len(), 1);
+        assert_eq!(update.nlri.len(), 1);
+    }
+
+    #[test]
+    fn test_bgp_update_message_serialization() {
+        let nlri = Nlri {
+            net: "192.0.2.0/24".parse().unwrap(),
+        };
+        let attrs = vec![
+            PathAttribute::origin(OriginType::Igp),
+            PathAttribute::aspath(vec![ASPATHSegment {
+                segment_type: ASPATHSegmentType::AsSequence,
+                as_list: vec![65000],
+            }]),
+            PathAttribute::nexthop(Ipv4Addr::new(192, 0, 2, 1)),
+        ];
+
+        let update = BGPUpdateMessageBuilder::default()
+            .withdrawn_routes(vec![])
+            .path_attributes(attrs)
+            .nlri(vec![nlri])
+            .build()
+            .unwrap();
+
+        let bytes: Vec<u8> = update.clone().into();
+        let parsed: BGPUpdateMessage = bytes.try_into()?;
+
+        assert_eq!(parsed.withdrawn_routes.len(), 0);
+        assert_eq!(parsed.path_attributes.len(), 3);
+        assert_eq!(parsed.nlri.len(), 1);
+    }
+
+    #[test]
+    fn test_bgp_notification_message() {
+        let notif = BGPNotificationMessage::new(ErrorCode::UpdateMessage, 3).unwrap();
+        assert_eq!(notif.error_code, ErrorCode::UpdateMessage);
+        assert_eq!(notif.error_subcode, 3);
+        assert!(notif.data.is_empty());
+    }
+
+    #[test]
+    fn test_bgp_notification_message_serialization() {
+        let notif = BGPNotificationMessageBuilder::default()
+            .error_code(ErrorCode::HoldTimerExpired)
+            .error_subcode(0)
+            .data(vec![1, 2, 3])
+            .build()
+            .unwrap();
+
+        let bytes: Vec<u8> = notif.clone().into();
+        assert_eq!(bytes[0], ErrorCode::HoldTimerExpired as u8);
+        assert_eq!(bytes[1], 0);
+        assert_eq!(&bytes[2..], &[1, 2, 3]);
+
+        let parsed: BGPNotificationMessage = bytes[0..2].to_vec().into();
+        assert_eq!(parsed.error_code, ErrorCode::HoldTimerExpired);
+        assert_eq!(parsed.error_subcode, 0);
+    }
+
+    #[test]
+    fn test_bgp_keepalive_message() {
+        let keepalive = BGPKeepaliveMessage::new().unwrap();
+        assert_eq!(keepalive.byte_len(), 0);
+
+        let bytes: Vec<u8> = keepalive.into();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn test_message_complete_serialization() {
+        let body = BGPKeepaliveMessage::new().unwrap();
+        let msg = Message::new(MessageType::Keepalive, BGPMessageBody::Keepalive(body)).unwrap();
+
+        let bytes: Vec<u8> = msg.into();
+        assert_eq!(bytes[0], MessageType::Keepalive as u8);
+    }
+
+    #[test]
+    fn test_message_from_bytes() {
+        // Create a complete BGP message with marker, length, and type
+        let mut msg_bytes = vec![];
+        msg_bytes.extend_from_slice(&MARKER); // Marker
+        msg_bytes.extend_from_slice(&[0, 19]); // Length
+        msg_bytes.push(MessageType::Keepalive as u8); // Type
+
+        let msg: Message = msg_bytes.into();
+        assert_eq!(msg.header.message_type, MessageType::Keepalive);
     }
 }
