@@ -3,8 +3,6 @@ name: Format and Test
 on:
   push:
     branches: [main, test]
-  pull_request:
-    branches: [main]
 
 jobs:
   check:
@@ -13,6 +11,11 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+
+      - name: Install Protocol Buffers compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
