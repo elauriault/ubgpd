@@ -4,7 +4,7 @@ services:
   ubgp:
     build:
       context: ../..
-      dockerfile: Dockerfile.ubgp
+      dockerfile: tests/integration/Dockerfile.ubgp
     networks:
       net1:
         ipv4_address: 1.1.1.254

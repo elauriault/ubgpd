@@ -9,6 +9,7 @@ use std::mem::size_of;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
+use crate::error::BgpError;
 use crate::neighbor;
 
 use super::attributes::*;
@@ -195,8 +196,18 @@ impl From<BGPUpdateMessage> for Vec<u8> {
     }
 }
 
-impl From<Vec<u8>> for BGPUpdateMessage {
-    fn from(src: Vec<u8>) -> Self {
+// In src/bgp/messages.rs, replace the existing From implementation with:
+
+impl TryFrom<Vec<u8>> for BGPUpdateMessage {
+    type Error = BgpError;
+
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
+        if src.len() < 2 {
+            return Err(BgpError::Message(
+                "Insufficient data for withdrawn routes length".to_string(),
+            ));
+        }
+
         let mut wdl = [0u8; 2];
         wdl.copy_from_slice(&src[0..2]);
         let wdl = u16::from_be_bytes(wdl) as usize;
@@ -268,7 +279,7 @@ impl From<Vec<u8>> for BGPUpdateMessage {
             .path_attributes(pa)
             .nlri(routes)
             .build()
-            .unwrap()
+            .map_err(|e| BgpError::Message(format!("Failed to build update message: {}", e)))
     }
 }
 
@@ -369,8 +380,10 @@ pub struct Message {
     pub body: BGPMessageBody,
 }
 
-impl From<Vec<u8>> for Message {
-    fn from(src: Vec<u8>) -> Self {
+impl TryFrom<Vec<u8>> for Message {
+    type Error = BgpError;
+
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut mtype = [0u8; 1];
         mtype.copy_from_slice(&src[18..19]);
         let mtype = MessageType::from_u8(mtype[0]).unwrap();
@@ -388,7 +401,7 @@ impl From<Vec<u8>> for Message {
                 BGPMessageBody::Open(msg)
             }
             MessageType::Update => {
-                let msg: BGPUpdateMessage = v.into();
+                let msg: BGPUpdateMessage = v.try_into()?; // Now this works!
                 BGPMessageBody::Update(msg)
             }
             MessageType::Notification => {
@@ -401,11 +414,11 @@ impl From<Vec<u8>> for Message {
             }
         };
 
-        MessageBuilder::default()
+        Ok(MessageBuilder::default()
             .header(header)
             .body(body)
             .build()
-            .unwrap()
+            .unwrap())
     }
 }
 
@@ -521,7 +534,7 @@ mod tests {
             .unwrap();
 
         let bytes: Vec<u8> = update.clone().into();
-        let parsed: BGPUpdateMessage = bytes.into();
+        let parsed: BGPUpdateMessage = bytes.try_into()?;
 
         assert_eq!(parsed.withdrawn_routes.len(), 0);
         assert_eq!(parsed.path_attributes.len(), 3);
