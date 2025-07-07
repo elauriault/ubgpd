@@ -11,6 +11,7 @@ extern crate derive_builder;
 
 mod bgp;
 mod config;
+mod error;
 mod fib;
 mod grpc;
 mod neighbor;
