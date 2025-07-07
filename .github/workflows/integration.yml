@@ -49,7 +49,7 @@ jobs:
           docker exec integration-frr-1 vtysh -c "show bgp ipv4"
           echo "  gobgp"
           docker exec integration-gobgp-1 gobgp global rib -a ipv4
-        echo "IPv6 RIB:"
+          echo "IPv6 RIB:"
           echo "  ubgp"
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 2 -s 1
           echo "  frr"
