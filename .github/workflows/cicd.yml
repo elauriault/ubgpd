@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-A warnings"
-    
     steps:
       - name: Check out code
         uses: actions/checkout@v4

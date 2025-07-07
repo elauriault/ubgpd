@@ -40,7 +40,6 @@ jobs:
           docker exec integration-frr-1 vtysh -c "show bgp summary"
           echo "  gobgp"
           docker exec integration-gobgp-1 gobgp neighbor
-          
       - name: Check RIB contents
         run: |
           echo "IPv4 RIB:"
@@ -57,7 +56,6 @@ jobs:
           docker exec integration-frr-1 vtysh -c "show bgp ipv6"
           echo "  gobgp"
           docker exec integration-gobgp-1 gobgp global rib -a ipv6
-
       - name: Collect logs on failure
         if: failure()
         run: |
