@@ -24,10 +24,11 @@ pub enum BgpError {
     InvalidState(String),
 }
 // Add conversion from BgpError to anyhow::Error
-impl From<BgpError> for anyhow::Error {
-    fn from(err: BgpError) -> Self {
-        anyhow::anyhow!(err)
-    }
+// impl From<BgpError> for anyhow::Error {
+//     fn from(err: BgpError) -> Self {
+//         anyhow::anyhow!(err)
+//     }
+// }
 pub enum RouteError {
     #[error("Failed to add route: {0}")]
     Add(String),

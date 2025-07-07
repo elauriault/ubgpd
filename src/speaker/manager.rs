@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 use crate::bgp::{self};
 use crate::fib::{self};

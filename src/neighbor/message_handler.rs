@@ -7,7 +7,6 @@ use crate::bgp::{self, AddressFamily, Nlri};
 use crate::rib::{RibUpdate, RouteAttributes};
 use crate::speaker::{self};
 use anyhow::{anyhow, Context, Result};
-use log::log;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -318,7 +317,7 @@ async fn withdraw_neighbor_routes(
         if let Some(rib_tx) = speaker.ribtx.get(&af) {
             let mut attr = rib::RouteAttributes::default();
             attr.peer_rid = remote_rid;
-            let mut msg = speaker::Update {
+            let msg = speaker::Update {
                 added: None,
                 withdrawn: Some(rib::RibUpdate {
                     nlris: vec![],

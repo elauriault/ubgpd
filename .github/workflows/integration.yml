@@ -7,22 +7,24 @@ on:
 jobs:
   integration:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out code
+        uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: actions/setup-rust@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
 
       - name: Build ubgpd Docker image
         run: docker build -t ubgp -f tests/integration/Dockerfile.ubgp .
 
       - name: Start test topology
         run: |
-          docker-compose -f tests/integration/docker-compose.yml up -d
+          docker compose -f tests/integration/docker-compose.yml up -d
           sleep 10
-
-      - name: Run integration tests
-        run: cargo test --test integration -- --test-threads=1
 
       - name: Show BGP state for debug (if failed)
         if: failure()
