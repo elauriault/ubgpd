@@ -12,6 +12,11 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
+      - name: Install Protocol Buffers compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -26,6 +31,39 @@ jobs:
           docker compose -f tests/integration/docker-compose.yml up -d
           sleep 10
 
-      - name: Show BGP state for debug (if failed)
+      - name: Check BGP neighbors status
+        run: |
+          echo "Neighbors:"
+          echo "  ubgp"
+          docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 neighbors
+          echo "  frr"
+          docker exec integration-frr-1 vtysh -c "show bgp summary"
+          echo "  gobgp"
+          docker exec integration-gobgp-1 gobgp neighbor
+      - name: Check RIB contents
+        run: |
+          echo "IPv4 RIB:"
+          echo "  ubgp"
+          docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 1 -s 1
+          echo "  frr"
+          docker exec integration-frr-1 vtysh -c "show bgp ipv4"
+          echo "  gobgp"
+          docker exec integration-gobgp-1 gobgp global rib -a ipv4
+        echo "IPv6 RIB:"
+          echo "  ubgp"
+          docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 2 -s 1
+          echo "  frr"
+          docker exec integration-frr-1 vtysh -c "show bgp ipv6"
+          echo "  gobgp"
+          docker exec integration-gobgp-1 gobgp global rib -a ipv6
+      - name: Collect logs on failure
         if: failure()
-        run: docker exec ubgp ubgpc --server 127.0.0.1 neighbors
+        run: |
+          echo "=== Container Status ==="
+          docker ps -a
+          echo "=== ubgp logs ==="
+          docker logs integration-ubgp-1
+          echo "=== gobgp logs ==="
+          docker logs integration-gobgp-1
+          echo "=== frr logs ==="
+          docker logs integration-frr-1
