@@ -30,19 +30,19 @@ jobs:
         run: |
           echo "=== BGP Neighbors Status ==="
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 neighbors
-          docker exec integration_frr_1 vtysh -c "show bgp summary"
-          docker exec integration_gobgp_1 vtysh -c "gobgp neighbor"
+          docker exec integration-frr-1 vtysh -c "show bgp summary"
+          docker exec integration-gobgp-1 vtysh -c "gobgp neighbor"
           
       - name: Check RIB contents
         run: |
           echo "=== IPv4 RIBs ==="
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 1 -s 1
-          docker exec integration_frr_1 vtysh -c "show bgp ipv4"
-          docker exec integration_gobgp_1 gobgp global rib -a ipv4
+          docker exec integration-frr-1 vtysh -c "show bgp ipv4"
+          docker exec integration-gobgp-1 gobgp global rib -a ipv4
           echo "=== IPv6 RIBs ==="
           docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 rib -a 2 -s 1
-          docker exec integration_frr_1 vtysh -c "show bgp ipv6"
-          docker exec integration_gobgp_1 gobgp global rib -a ipv6
+          docker exec integration-frr-1 vtysh -c "show bgp ipv6"
+          docker exec integration-gobgp-1 gobgp global rib -a ipv6
 
       - name: Collect logs on failure
         if: failure()
@@ -50,10 +50,8 @@ jobs:
           echo "=== Container Status ==="
           docker ps -a
           echo "=== ubgp logs ==="
-          docker exec integration-ubgp-1
+          docker logs integration-ubgp-1
           echo "=== gobgp logs ==="
-          docker exec integration-gobgp-1
+          docker logs integration-gobgp-1
           echo "=== frr logs ==="
-          docker exec integration-frr-1
-          echo "=== BGP Neighbors ==="
-          docker exec integration-ubgp-1 ubgpc --server 127.0.0.1 neighbors || true
+          docker logs integration-frr-1
