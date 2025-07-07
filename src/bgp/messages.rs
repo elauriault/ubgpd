@@ -532,7 +532,9 @@ mod tests {
             .unwrap();
 
         let bytes: Vec<u8> = update.clone().into();
-        let parsed: BGPUpdateMessage = bytes.try_into()?;
+        let parsed: BGPUpdateMessage = bytes
+            .try_into()
+            .expect("Failed to parse BGP update message");
 
         assert_eq!(parsed.withdrawn_routes.len(), 0);
         assert_eq!(parsed.path_attributes.len(), 3);
@@ -580,8 +582,8 @@ mod tests {
         let body = BGPKeepaliveMessage::new().unwrap();
         let msg = Message::new(MessageType::Keepalive, BGPMessageBody::Keepalive(body)).unwrap();
 
-        let bytes: Vec<u8> = msg.into();
-        assert_eq!(bytes[0], MessageType::Keepalive as u8);
+        let serialized_bytes: Vec<u8> = msg.into();
+        assert_eq!(serialized_bytes[0], MessageType::Keepalive as u8);
     }
 
     #[test]
@@ -591,7 +593,7 @@ mod tests {
         msg_bytes.extend_from_slice(&[0, 19]);
         msg_bytes.push(MessageType::Keepalive as u8);
 
-        let msg: Message = msg_bytes.into();
+        let msg: Message = msg_bytes.try_into().expect("Failed to parse BGP message");
         assert_eq!(msg.header.message_type, MessageType::Keepalive);
     }
 }
