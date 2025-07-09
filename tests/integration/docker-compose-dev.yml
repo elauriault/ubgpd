@@ -1,0 +1,83 @@
+version: "3.8"
+
+services:
+  ubgp:
+    image: ubuntu:24.04
+    networks:
+      net1:
+        ipv4_address: 1.1.1.254
+        ipv6_address: "2001:1:dead:beef::6"
+      net2:
+        ipv4_address: 2.2.2.254
+        ipv6_address: "2001:2:dead:beef::6"
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    volumes:
+      - ./ubgpd.conf:/etc/ubgpd.conf
+      - ../../target/debug/ubgpd:/usr/local/bin/ubgpd
+      - ../../target/debug/ubgpc:/usr/local/bin/ubgpc
+    environment:
+      - RUST_LOG=debug
+    command: >
+      bash -c "
+        apt-get update &&
+        apt-get install -y iproute2 iputils-ping net-tools tcpdump nmap libssl3 &&
+        rm -rf /var/lib/apt/lists/* &&
+        chmod +x /usr/local/bin/ubgpd &&
+        chmod +x /usr/local/bin/ubgpc &&
+        ubgpd --config /etc/ubgpd.conf
+      "
+    expose:
+      - "179"
+      - "50051"
+
+  gobgp:
+    image: smorris76/gobgp-containerlab
+    networks:
+      net1:
+        ipv4_address: 1.1.1.2
+        ipv6_address: "2001:1:dead:beef::2"
+    environment:
+      INTERFACE_CONFIG: '{"interfaces":[{"name":"eth0","ip":"1.1.1.2/24"},{"name":"eth0","ip":"2001:1:dead:beef::2/64"}]}'
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    volumes:
+      - ./gobgp.conf:/etc/gobgp/gobgpd.conf
+    expose:
+      - "179"
+
+  frr:
+    image: frrouting/frr:latest
+    networks:
+      net2:
+        ipv4_address: 2.2.2.3
+        ipv6_address: "2001:2:dead:beef::3"
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    volumes:
+      - ./frr:/etc/frr
+    expose:
+      - "179"
+
+networks:
+  net1:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 1.1.1.0/24
+        - subnet: "2001:1:dead:beef::/64"
+  net2:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 2.2.2.0/24
+        - subnet: "2001:2:dead:beef::/64"
