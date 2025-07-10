@@ -22,6 +22,8 @@ pub enum BgpError {
     MissingField(String),
     #[error("Invalid state transition: {0}")]
     InvalidState(String),
+    #[error("Validation error: {0}")]
+    Validation(#[from] crate::bgp::BgpValidationError),
 }
 // Add conversion from BgpError to anyhow::Error
 // impl From<BgpError> for anyhow::Error {

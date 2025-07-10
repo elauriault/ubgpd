@@ -13,7 +13,7 @@ pub enum BGPOptionalParameterType {
     Capability = 2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BGPOptionalParameter {
     pub param_type: BGPOptionalParameterType,
     pub param_length: usize,
@@ -255,6 +255,15 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                     let cap_len = data[offset + 1] as usize;
                     if offset + 2 + cap_len > data.len() {
                         log::warn!("Capability length {} exceeds available data", cap_len);
+                        let available_data = data.len() - offset - 2;
+                        let is_excessive_claim = cap_len > available_data * 2;
+
+                        if is_excessive_claim && available_data > 0 {
+                            let available_len = data.len() - offset;
+                            let cap_data = data[offset..offset + available_len].to_vec();
+                            let cap: BGPCapability = cap_data.into();
+                            all_caps.push(cap);
+                        }
                         break;
                     }
                     let cap_data = data[offset..offset + 2 + cap_len].to_vec();

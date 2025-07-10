@@ -11,3 +11,6 @@ mod codec;
 mod messages;
 mod nlri;
 mod types;
+
+#[cfg(test)]
+mod tests;
