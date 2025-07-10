@@ -13,3 +13,7 @@ mod codec;
 mod messages;
 mod nlri;
 mod types;
+
+// Include tests
+#[cfg(test)]
+mod tests;

@@ -1,3 +1,6 @@
+use crate::bgp::types::validate_marker;
+use crate::error::BgpError;
+use crate::neighbor;
 use anyhow::Result;
 use byteorder::{BigEndian, WriteBytesExt};
 use derive_builder::Builder;
@@ -8,9 +11,6 @@ use std::io::Cursor;
 use std::mem::size_of;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-
-use crate::error::BgpError;
-use crate::neighbor;
 
 use super::attributes::*;
 use super::capabilities::*;
@@ -217,16 +217,30 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
         let mut i = 2;
 
         while wdl > used {
+            if i >= src.len() {
+                break;
+            }
             let plen = src[i];
             let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+            if end > src.len() {
+                break;
+            }
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: Nlri = buf.into();
+            let n: Nlri = buf
+                .try_into()
+                .map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
             wd.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             used += blen;
             i += blen;
+        }
+
+        if i + 2 > src.len() {
+            return Err(BgpError::Message(
+                "Not enough data for path attributes length".to_string(),
+            ));
         }
 
         let mut atl = [0u8; 2];
@@ -235,22 +249,44 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
 
         i += 2;
 
+        // Validate that we have enough data for the claimed path attributes length
+        if i + atl > src.len() {
+            return Err(BgpError::Message(
+                "Path attributes length exceeds available data".to_string(),
+            ));
+        }
+
         let mut pa: Vec<PathAttribute> = vec![];
         let mut used = 0;
         while atl > used {
+            if i >= src.len() {
+                break;
+            }
             let atn: usize;
             let n: PathAttribute;
             match is_extended_len(src[i]) {
                 false => {
+                    if i + 3 > src.len() {
+                        break;
+                    }
                     atn = src[i + 2] as usize;
+                    if i + 3 + atn > src.len() {
+                        break;
+                    }
                     n = src[i..i + 3 + atn].to_vec().into();
                     used += 3 + atn;
                     i += 3 + atn;
                 }
                 true => {
+                    if i + 4 > src.len() {
+                        break;
+                    }
                     let mut l = [0u8; 2];
                     l.copy_from_slice(&src[i + 2..i + 4]);
                     atn = u16::from_be_bytes(l) as usize;
+                    if i + 4 + atn > src.len() {
+                        break;
+                    }
                     n = src[i..i + 4 + atn].to_vec().into();
                     used += 4 + atn;
                     i += 4 + atn;
@@ -268,7 +304,9 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: Nlri = buf.into();
+            let n: Nlri = buf
+                .try_into()
+                .map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
             routes.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             i += blen;
@@ -384,13 +422,35 @@ impl TryFrom<Vec<u8>> for Message {
     type Error = BgpError;
 
     fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
+        if src.len() < 19 {
+            return Err(BgpError::Message("Message too short".to_string()));
+        }
+
+        // Validate marker
+        let marker: [u8; 16] = src[0..16].try_into().unwrap();
+        validate_marker(&marker).map_err(|_| BgpError::Message("Invalid marker".to_string()))?;
+
+        // Validate length
+        let mut length_bytes = [0u8; 2];
+        length_bytes.copy_from_slice(&src[16..18]);
+        let declared_length = u16::from_be_bytes(length_bytes) as usize;
+
+        if declared_length < 19 || declared_length > 4096 {
+            return Err(BgpError::Message("Invalid message length".to_string()));
+        }
+
+        if src.len() != declared_length {
+            return Err(BgpError::Message("Message length mismatch".to_string()));
+        }
+
         let mut mtype = [0u8; 1];
         mtype.copy_from_slice(&src[18..19]);
-        let mtype = MessageType::from_u8(mtype[0]).unwrap();
+        let mtype = MessageType::from_u8(mtype[0])
+            .ok_or_else(|| BgpError::Message("Invalid message type".to_string()))?;
         let header = BGPMessageHeaderBuilder::default()
             .message_type(mtype.clone())
             .build()
-            .unwrap();
+            .map_err(|e| BgpError::Message(format!("Failed to build header: {}", e)))?;
         let mut length_bytes = [0u8; 2];
         length_bytes.copy_from_slice(&src[16..18]);
         let srclength = src.len();
