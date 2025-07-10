@@ -257,7 +257,7 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                         log::warn!("Capability length {} exceeds available data", cap_len);
                         let available_data = data.len() - offset - 2;
                         let is_excessive_claim = cap_len > available_data * 2;
-                        
+
                         if is_excessive_claim && available_data > 0 {
                             let available_len = data.len() - offset;
                             let cap_data = data[offset..offset + available_len].to_vec();
