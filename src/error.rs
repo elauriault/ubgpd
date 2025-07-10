@@ -30,6 +30,9 @@ pub enum BgpError {
 
     #[error("Invalid state transition: {0}")]
     InvalidState(String),
+
+    #[error("Validation error: {0}")]
+    Validation(#[from] crate::bgp::BgpValidationError),
 }
 
 // Add conversion from BgpError to anyhow::Error

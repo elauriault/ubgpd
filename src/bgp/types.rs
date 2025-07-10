@@ -11,14 +11,14 @@ pub const MIN_MESSAGE_LENGTH: usize = 19;
 pub const MAX_MESSAGE_LENGTH: usize = 4096;
 
 // Basic enums
-#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
+#[derive(Debug, Clone, Copy, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u16)]
 pub enum Afi {
     Ipv4 = 1,
     Ipv6,
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
+#[derive(Debug, Clone, Copy, FromPrimitive, PartialEq, Deserialize, Hash, Eq)]
 #[repr(u8)]
 pub enum Safi {
     NLRIUnicast = 1,
@@ -31,7 +31,7 @@ pub struct AddressFamily {
     pub safi: Safi,
 }
 
-#[derive(Debug, Clone, FromPrimitive, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, FromPrimitive, PartialEq, Default)]
 #[repr(u8)]
 pub enum MessageType {
     Open = 1,

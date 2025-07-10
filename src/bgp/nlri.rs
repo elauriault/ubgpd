@@ -7,6 +7,7 @@ use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::types::*;
+use crate::error::BgpError;
 
 #[derive(Builder, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 #[builder(setter(into))]
@@ -23,7 +24,7 @@ pub struct Ipv6Octets {
 }
 
 /// Returns the number of bytes needed to represent a prefix of length `plen`.
-fn prefix_bytes(plen: u8) -> usize {
+pub fn prefix_bytes(plen: u8) -> usize {
     (plen as usize).div_ceil(8)
 }
 
@@ -60,20 +61,40 @@ impl From<&Nlri> for IpNet {
     }
 }
 
-impl From<Ipv4Octets> for Nlri {
-    fn from(src: Ipv4Octets) -> Self {
+impl TryFrom<Ipv4Octets> for Nlri {
+    type Error = BgpError;
+    
+    fn try_from(src: Ipv4Octets) -> Result<Self, Self::Error> {
         let mut addr = src.octets;
+        if addr.is_empty() {
+            return Err(BgpError::Message("Empty octets data".to_string()));
+        }
         let plen = addr.remove(0);
+        let expected_bytes = if plen == 0 { 0 } else { (plen as usize).div_ceil(8) };
+        if addr.len() < expected_bytes {
+            return Err(BgpError::Message(format!("Insufficient octets for prefix length {}: need {}, got {}", plen, expected_bytes, addr.len())));
+        }
         addr.resize(4, 0);
-        let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen).unwrap();
-        NlriBuilder::default().net(net).build().unwrap()
+        let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen)
+            .map_err(|e| BgpError::Message(format!("Invalid IPv4 network: {}", e)))?;
+        Ok(NlriBuilder::default().net(net).build()
+            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
     }
 }
 
-impl From<Ipv6Octets> for Nlri {
-    fn from(src: Ipv6Octets) -> Self {
+impl TryFrom<Ipv6Octets> for Nlri {
+    type Error = BgpError;
+    
+    fn try_from(src: Ipv6Octets) -> Result<Self, Self::Error> {
         let mut addr = src.octets;
+        if addr.is_empty() {
+            return Err(BgpError::Message("Empty octets data".to_string()));
+        }
         let plen = addr.remove(0);
+        let expected_bytes = if plen == 0 { 0 } else { (plen as usize).div_ceil(8) };
+        if addr.len() < expected_bytes {
+            return Err(BgpError::Message(format!("Insufficient octets for prefix length {}: need {}, got {}", plen, expected_bytes, addr.len())));
+        }
         addr.resize(16, 0);
         let mut addr6: Vec<u16> = vec![];
         let mut i = 0;
@@ -91,8 +112,9 @@ impl From<Ipv6Octets> for Nlri {
             ),
             plen,
         )
-        .unwrap();
-        NlriBuilder::default().net(net).build().unwrap()
+        .map_err(|e| BgpError::Message(format!("Invalid IPv6 network: {}", e)))?;
+        Ok(NlriBuilder::default().net(net).build()
+            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
     }
 }
 
@@ -134,19 +156,39 @@ impl Default for Mpunlri {
     }
 }
 
-impl From<Vec<u8>> for Mpnlri {
-    fn from(src: Vec<u8>) -> Self {
+impl TryFrom<Vec<u8>> for Mpnlri {
+    type Error = BgpError;
+    
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut src = src;
+        
+        // Check if we have at least 1 byte for total_len
+        if src.is_empty() {
+            return Err(BgpError::Message("Empty MP_REACH_NLRI data".to_string()));
+        }
+        
         let total_len = src.remove(0) as usize;
 
+        // Check if we have at least 4 bytes for AFI, SAFI, and NHL
+        if src.len() < 4 {
+            return Err(BgpError::Message("Insufficient data for MP_REACH_NLRI header".to_string()));
+        }
+
         let afi = u16::from_be_bytes([src[0], src[1]]);
-        let afi: Afi = FromPrimitive::from_u16(afi).unwrap();
+        let afi: Afi = FromPrimitive::from_u16(afi)
+            .ok_or_else(|| BgpError::Message(format!("Invalid AFI: {}", afi)))?;
 
         let safi = src[2];
-        let safi: Safi = FromPrimitive::from_u8(safi).unwrap();
+        let safi: Safi = FromPrimitive::from_u8(safi)
+            .ok_or_else(|| BgpError::Message(format!("Invalid SAFI: {}", safi)))?;
 
         let nhl = src[3];
         let nhl = nhl as usize;
+
+        // Check if we have enough data for the next hop
+        if src.len() < 4 + nhl {
+            return Err(BgpError::Message("Insufficient data for next hop address".to_string()));
+        }
 
         let mut addr = src[4..4 + nhl].to_vec();
 
@@ -165,7 +207,7 @@ impl From<Vec<u8>> for Mpnlri {
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: Nlri = buf.into();
+                    let n: Nlri = buf.try_into()?;
                     nlris.push(n);
                     let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
@@ -193,7 +235,7 @@ impl From<Vec<u8>> for Mpnlri {
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: Nlri = buf.into();
+                    let n: Nlri = buf.try_into()?;
                     nlris.push(n);
                     let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
@@ -201,36 +243,57 @@ impl From<Vec<u8>> for Mpnlri {
             }
         }
         let af = AddressFamily { afi, safi };
-        Mpnlri { af, nh, nlris }
+        Ok(Mpnlri { af, nh, nlris })
     }
 }
 
-impl From<Vec<u8>> for Mpunlri {
-    fn from(src: Vec<u8>) -> Self {
+impl TryFrom<Vec<u8>> for Mpunlri {
+    type Error = BgpError;
+    
+    fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut src = src;
+        
+        // Check if we have at least 1 byte for total_len
+        if src.is_empty() {
+            return Err(BgpError::Message("Empty MP_UNREACH_NLRI data".to_string()));
+        }
+        
         let total_len = src.remove(0) as usize;
+
+        // Check if we have at least 3 bytes for AFI and SAFI
+        if src.len() < 3 {
+            return Err(BgpError::Message("Insufficient data for MP_UNREACH_NLRI header".to_string()));
+        }
 
         let mut afi = [0u8; 2];
         afi.copy_from_slice(&src[0..2]);
         let afi = u16::from_be_bytes(afi);
-        let afi: Afi = FromPrimitive::from_u16(afi).unwrap();
+        let afi: Afi = FromPrimitive::from_u16(afi)
+            .ok_or_else(|| BgpError::Message(format!("Invalid AFI: {}", afi)))?;
 
         let mut safi = [0u8; 1];
         safi.copy_from_slice(&src[2..3]);
         let safi = u8::from_be_bytes(safi);
-        let safi: Safi = FromPrimitive::from_u8(safi).unwrap();
+        let safi: Safi = FromPrimitive::from_u8(safi)
+            .ok_or_else(|| BgpError::Message(format!("Invalid SAFI: {}", safi)))?;
 
         let mut nlris: Vec<Nlri> = vec![];
         let mut i = 3;
         match afi {
             Afi::Ipv4 => {
                 while i < total_len {
+                    if i >= src.len() {
+                        return Err(BgpError::Message("Insufficient data for NLRI prefix length".to_string()));
+                    }
                     let plen = src[i];
                     let end = i + prefix_bytes(plen) + 1;
+                    if end > src.len() {
+                        return Err(BgpError::Message("Insufficient data for NLRI prefix".to_string()));
+                    }
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: Nlri = buf.into();
+                    let n: Nlri = buf.try_into()?;
                     nlris.push(n);
                     let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
@@ -238,12 +301,18 @@ impl From<Vec<u8>> for Mpunlri {
             }
             Afi::Ipv6 => {
                 while i < total_len {
+                    if i >= src.len() {
+                        return Err(BgpError::Message("Insufficient data for NLRI prefix length".to_string()));
+                    }
                     let plen = src[i];
                     let end = i + prefix_bytes(plen) + 1;
+                    if end > src.len() {
+                        return Err(BgpError::Message("Insufficient data for NLRI prefix".to_string()));
+                    }
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),
                     };
-                    let n: Nlri = buf.into();
+                    let n: Nlri = buf.try_into()?;
                     nlris.push(n);
                     let blen = prefix_bytes(n.net.prefix_len()) + 1;
                     i += blen;
@@ -251,7 +320,7 @@ impl From<Vec<u8>> for Mpunlri {
             }
         }
         let af = AddressFamily { afi, safi };
-        Mpunlri { af, nlris }
+        Ok(Mpunlri { af, nlris })
     }
 }
 
@@ -322,7 +391,7 @@ mod tests {
         let octets = Ipv4Octets {
             octets: bytes.clone(),
         };
-        let nlri2: Nlri = octets.into();
+        let nlri2: Nlri = octets.try_into().unwrap();
         assert_eq!(nlri, nlri2);
     }
 
@@ -337,7 +406,7 @@ mod tests {
         let octets = Ipv6Octets {
             octets: bytes.clone(),
         };
-        let nlri2: Nlri = octets.into();
+        let nlri2: Nlri = octets.try_into().unwrap();
         assert_eq!(nlri, nlri2);
     }
 
@@ -356,7 +425,7 @@ mod tests {
             nlris: vec![nlri.clone()],
         };
         let bytes: Vec<u8> = mpnlri.clone().into();
-        let mpnlri2: Mpnlri = bytes.into();
+        let mpnlri2: Mpnlri = bytes.try_into().unwrap();
         assert_eq!(mpnlri.af, mpnlri2.af);
         assert_eq!(mpnlri.nlris, mpnlri2.nlris);
         assert_eq!(mpnlri.nh, mpnlri2.nh);
@@ -375,7 +444,7 @@ mod tests {
             nlris: vec![nlri.clone()],
         };
         let bytes: Vec<u8> = mpunlri.clone().into();
-        let mpunlri2: Mpunlri = bytes.into();
+        let mpunlri2: Mpunlri = bytes.try_into().unwrap();
         assert_eq!(mpunlri.af, mpunlri2.af);
         assert_eq!(mpunlri.nlris, mpunlri2.nlris);
     }
@@ -454,7 +523,7 @@ mod tests {
             nlris: vec![nlri.clone()],
         };
         let bytes: Vec<u8> = mpnlri.clone().into();
-        let mpnlri2: Mpnlri = bytes.into();
+        let mpnlri2: Mpnlri = bytes.try_into().unwrap();
         assert_eq!(mpnlri.af, mpnlri2.af);
         assert_eq!(mpnlri.nlris, mpnlri2.nlris);
         assert_eq!(mpnlri.nh, mpnlri2.nh);
@@ -484,7 +553,7 @@ mod tests {
             nlris: nlris.clone(),
         };
         let bytes: Vec<u8> = mpnlri.clone().into();
-        let mpnlri2: Mpnlri = bytes.into();
+        let mpnlri2: Mpnlri = bytes.try_into().unwrap();
         assert_eq!(mpnlri.nlris.len(), mpnlri2.nlris.len());
         for (n1, n2) in mpnlri.nlris.iter().zip(mpnlri2.nlris.iter()) {
             assert_eq!(n1, n2);
@@ -505,7 +574,7 @@ mod tests {
             nlris: vec![nlri.clone()],
         };
         let bytes: Vec<u8> = mpunlri.clone().into();
-        let mpunlri2: Mpunlri = bytes.into();
+        let mpunlri2: Mpunlri = bytes.try_into().unwrap();
         assert_eq!(mpunlri.af, mpunlri2.af);
         assert_eq!(mpunlri.nlris, mpunlri2.nlris);
     }
