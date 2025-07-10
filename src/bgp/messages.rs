@@ -1,3 +1,6 @@
+use crate::bgp::types::validate_marker;
+use crate::error::BgpError;
+use crate::neighbor;
 use anyhow::Result;
 use byteorder::{BigEndian, WriteBytesExt};
 use derive_builder::Builder;
@@ -8,9 +11,6 @@ use std::io::Cursor;
 use std::mem::size_of;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use crate::error::BgpError;
-use crate::bgp::types::validate_marker;
-use crate::neighbor;
 
 use super::attributes::*;
 use super::capabilities::*;
@@ -228,7 +228,9 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: Nlri = buf.try_into().map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
+            let n: Nlri = buf
+                .try_into()
+                .map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
             wd.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             used += blen;
@@ -236,9 +238,11 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
         }
 
         if i + 2 > src.len() {
-            return Err(BgpError::Message("Not enough data for path attributes length".to_string()));
+            return Err(BgpError::Message(
+                "Not enough data for path attributes length".to_string(),
+            ));
         }
-        
+
         let mut atl = [0u8; 2];
         atl.copy_from_slice(&src[i..i + 2]);
         let atl = u16::from_be_bytes(atl) as usize;
@@ -247,7 +251,9 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
 
         // Validate that we have enough data for the claimed path attributes length
         if i + atl > src.len() {
-            return Err(BgpError::Message("Path attributes length exceeds available data".to_string()));
+            return Err(BgpError::Message(
+                "Path attributes length exceeds available data".to_string(),
+            ));
         }
 
         let mut pa: Vec<PathAttribute> = vec![];
@@ -298,7 +304,9 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
-            let n: Nlri = buf.try_into().map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
+            let n: Nlri = buf
+                .try_into()
+                .map_err(|e| BgpError::Message(format!("Failed to parse NLRI: {}", e)))?;
             routes.push(n);
             let blen = ((n.net.prefix_len() as f32 / 8.0).ceil() + 1.0) as usize;
             i += blen;
@@ -417,30 +425,28 @@ impl TryFrom<Vec<u8>> for Message {
         if src.len() < 19 {
             return Err(BgpError::Message("Message too short".to_string()));
         }
-        
+
         // Validate marker
         let marker: [u8; 16] = src[0..16].try_into().unwrap();
-        validate_marker(&marker)
-            .map_err(|_| BgpError::Message("Invalid marker".to_string()))?;
-        
+        validate_marker(&marker).map_err(|_| BgpError::Message("Invalid marker".to_string()))?;
+
         // Validate length
         let mut length_bytes = [0u8; 2];
         length_bytes.copy_from_slice(&src[16..18]);
         let declared_length = u16::from_be_bytes(length_bytes) as usize;
-        
+
         if declared_length < 19 || declared_length > 4096 {
             return Err(BgpError::Message("Invalid message length".to_string()));
         }
-        
+
         if src.len() != declared_length {
             return Err(BgpError::Message("Message length mismatch".to_string()));
         }
-        
+
         let mut mtype = [0u8; 1];
         mtype.copy_from_slice(&src[18..19]);
-        let mtype = MessageType::from_u8(mtype[0]).ok_or_else(|| {
-            BgpError::Message("Invalid message type".to_string())
-        })?;
+        let mtype = MessageType::from_u8(mtype[0])
+            .ok_or_else(|| BgpError::Message("Invalid message type".to_string()))?;
         let header = BGPMessageHeaderBuilder::default()
             .message_type(mtype.clone())
             .build()

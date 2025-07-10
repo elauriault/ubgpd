@@ -320,12 +320,12 @@ impl From<Vec<u8>> for PathAttribute {
             PathAttributeType::Dpa => PathAttributeValue::Dpa,
             PathAttributeType::Advertiser => PathAttributeValue::Advertiser,
             PathAttributeType::RcidPathClusterId => PathAttributeValue::RcidPathClusterId,
-            PathAttributeType::MPReachableNLRI => {
-                PathAttributeValue::MPReachableNLRI(src[2..].to_vec().try_into().unwrap_or_default())
-            }
-            PathAttributeType::MPUnreachableNLRI => {
-                PathAttributeValue::MPUnreachableNLRI(src[2..].to_vec().try_into().unwrap_or_default())
-            }
+            PathAttributeType::MPReachableNLRI => PathAttributeValue::MPReachableNLRI(
+                src[2..].to_vec().try_into().unwrap_or_default(),
+            ),
+            PathAttributeType::MPUnreachableNLRI => PathAttributeValue::MPUnreachableNLRI(
+                src[2..].to_vec().try_into().unwrap_or_default(),
+            ),
             PathAttributeType::ExtCommunities => PathAttributeValue::ExtCommunities,
         };
 

@@ -63,37 +63,57 @@ impl From<&Nlri> for IpNet {
 
 impl TryFrom<Ipv4Octets> for Nlri {
     type Error = BgpError;
-    
+
     fn try_from(src: Ipv4Octets) -> Result<Self, Self::Error> {
         let mut addr = src.octets;
         if addr.is_empty() {
             return Err(BgpError::Message("Empty octets data".to_string()));
         }
         let plen = addr.remove(0);
-        let expected_bytes = if plen == 0 { 0 } else { (plen as usize).div_ceil(8) };
+        let expected_bytes = if plen == 0 {
+            0
+        } else {
+            (plen as usize).div_ceil(8)
+        };
         if addr.len() < expected_bytes {
-            return Err(BgpError::Message(format!("Insufficient octets for prefix length {}: need {}, got {}", plen, expected_bytes, addr.len())));
+            return Err(BgpError::Message(format!(
+                "Insufficient octets for prefix length {}: need {}, got {}",
+                plen,
+                expected_bytes,
+                addr.len()
+            )));
         }
         addr.resize(4, 0);
         let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen)
             .map_err(|e| BgpError::Message(format!("Invalid IPv4 network: {}", e)))?;
-        Ok(NlriBuilder::default().net(net).build()
+        Ok(NlriBuilder::default()
+            .net(net)
+            .build()
             .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
     }
 }
 
 impl TryFrom<Ipv6Octets> for Nlri {
     type Error = BgpError;
-    
+
     fn try_from(src: Ipv6Octets) -> Result<Self, Self::Error> {
         let mut addr = src.octets;
         if addr.is_empty() {
             return Err(BgpError::Message("Empty octets data".to_string()));
         }
         let plen = addr.remove(0);
-        let expected_bytes = if plen == 0 { 0 } else { (plen as usize).div_ceil(8) };
+        let expected_bytes = if plen == 0 {
+            0
+        } else {
+            (plen as usize).div_ceil(8)
+        };
         if addr.len() < expected_bytes {
-            return Err(BgpError::Message(format!("Insufficient octets for prefix length {}: need {}, got {}", plen, expected_bytes, addr.len())));
+            return Err(BgpError::Message(format!(
+                "Insufficient octets for prefix length {}: need {}, got {}",
+                plen,
+                expected_bytes,
+                addr.len()
+            )));
         }
         addr.resize(16, 0);
         let mut addr6: Vec<u16> = vec![];
@@ -113,7 +133,9 @@ impl TryFrom<Ipv6Octets> for Nlri {
             plen,
         )
         .map_err(|e| BgpError::Message(format!("Invalid IPv6 network: {}", e)))?;
-        Ok(NlriBuilder::default().net(net).build()
+        Ok(NlriBuilder::default()
+            .net(net)
+            .build()
             .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
     }
 }
@@ -158,20 +180,22 @@ impl Default for Mpunlri {
 
 impl TryFrom<Vec<u8>> for Mpnlri {
     type Error = BgpError;
-    
+
     fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut src = src;
-        
+
         // Check if we have at least 1 byte for total_len
         if src.is_empty() {
             return Err(BgpError::Message("Empty MP_REACH_NLRI data".to_string()));
         }
-        
+
         let total_len = src.remove(0) as usize;
 
         // Check if we have at least 4 bytes for AFI, SAFI, and NHL
         if src.len() < 4 {
-            return Err(BgpError::Message("Insufficient data for MP_REACH_NLRI header".to_string()));
+            return Err(BgpError::Message(
+                "Insufficient data for MP_REACH_NLRI header".to_string(),
+            ));
         }
 
         let afi = u16::from_be_bytes([src[0], src[1]]);
@@ -187,7 +211,9 @@ impl TryFrom<Vec<u8>> for Mpnlri {
 
         // Check if we have enough data for the next hop
         if src.len() < 4 + nhl {
-            return Err(BgpError::Message("Insufficient data for next hop address".to_string()));
+            return Err(BgpError::Message(
+                "Insufficient data for next hop address".to_string(),
+            ));
         }
 
         let mut addr = src[4..4 + nhl].to_vec();
@@ -249,20 +275,22 @@ impl TryFrom<Vec<u8>> for Mpnlri {
 
 impl TryFrom<Vec<u8>> for Mpunlri {
     type Error = BgpError;
-    
+
     fn try_from(src: Vec<u8>) -> Result<Self, Self::Error> {
         let mut src = src;
-        
+
         // Check if we have at least 1 byte for total_len
         if src.is_empty() {
             return Err(BgpError::Message("Empty MP_UNREACH_NLRI data".to_string()));
         }
-        
+
         let total_len = src.remove(0) as usize;
 
         // Check if we have at least 3 bytes for AFI and SAFI
         if src.len() < 3 {
-            return Err(BgpError::Message("Insufficient data for MP_UNREACH_NLRI header".to_string()));
+            return Err(BgpError::Message(
+                "Insufficient data for MP_UNREACH_NLRI header".to_string(),
+            ));
         }
 
         let mut afi = [0u8; 2];
@@ -283,12 +311,16 @@ impl TryFrom<Vec<u8>> for Mpunlri {
             Afi::Ipv4 => {
                 while i < total_len {
                     if i >= src.len() {
-                        return Err(BgpError::Message("Insufficient data for NLRI prefix length".to_string()));
+                        return Err(BgpError::Message(
+                            "Insufficient data for NLRI prefix length".to_string(),
+                        ));
                     }
                     let plen = src[i];
                     let end = i + prefix_bytes(plen) + 1;
                     if end > src.len() {
-                        return Err(BgpError::Message("Insufficient data for NLRI prefix".to_string()));
+                        return Err(BgpError::Message(
+                            "Insufficient data for NLRI prefix".to_string(),
+                        ));
                     }
                     let buf = Ipv4Octets {
                         octets: src[i..end].to_vec(),
@@ -302,12 +334,16 @@ impl TryFrom<Vec<u8>> for Mpunlri {
             Afi::Ipv6 => {
                 while i < total_len {
                     if i >= src.len() {
-                        return Err(BgpError::Message("Insufficient data for NLRI prefix length".to_string()));
+                        return Err(BgpError::Message(
+                            "Insufficient data for NLRI prefix length".to_string(),
+                        ));
                     }
                     let plen = src[i];
                     let end = i + prefix_bytes(plen) + 1;
                     if end > src.len() {
-                        return Err(BgpError::Message("Insufficient data for NLRI prefix".to_string()));
+                        return Err(BgpError::Message(
+                            "Insufficient data for NLRI prefix".to_string(),
+                        ));
                     }
                     let buf = Ipv6Octets {
                         octets: src[i..end].to_vec(),

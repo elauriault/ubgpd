@@ -264,7 +264,7 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
                         // but skip capabilities that are just slightly incomplete
                         let available_data = data.len() - offset - 2;
                         let is_excessive_claim = cap_len > available_data * 2; // Claim is more than double available
-                        
+
                         if is_excessive_claim && available_data > 0 {
                             // Malformed length field - parse with available data
                             let available_len = data.len() - offset;

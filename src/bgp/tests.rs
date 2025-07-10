@@ -2,8 +2,8 @@
 #[cfg(test)]
 mod attributes_tests {
     use super::super::attributes::*;
-    use super::super::types::*;
     use super::super::nlri::*;
+    use super::super::types::*;
     use std::net::Ipv4Addr;
     include!("../bgp/attributes_tests.rs");
 }
@@ -17,12 +17,12 @@ mod capabilities_tests {
 
 #[cfg(test)]
 mod messages_tests {
-    use super::super::messages::*;
-    use super::super::types::*;
     use super::super::attributes::*;
+    use super::super::messages::*;
     use super::super::nlri::*;
-    use std::net::Ipv4Addr;
+    use super::super::types::*;
     use crate::neighbor::Capabilities;
+    use std::net::Ipv4Addr;
     include!("../bgp/messages_tests.rs");
 }
 
@@ -30,16 +30,16 @@ mod messages_tests {
 mod nlri_tests {
     use super::super::nlri::*;
     use super::super::types::*;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use ipnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::hash::Hash;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     include!("../bgp/nlri_tests.rs");
 }
 
 #[cfg(test)]
 mod types_tests {
     use super::super::types::*;
-    use std::collections::HashSet;
     use num_traits::FromPrimitive;
+    use std::collections::HashSet;
     include!("../bgp/types_tests.rs");
 }
