@@ -70,6 +70,8 @@ impl BGPSpeaker {
             neighbor::BGPState::Idle,
             config.families,
             ribtx,
+            config.max_retry_count,
+            config.exponential_backoff,
         )));
         self.neighbors.push(n);
     }
