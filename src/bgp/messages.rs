@@ -17,6 +17,19 @@ use super::capabilities::*;
 use super::nlri::*;
 use super::types::*;
 
+// BGP protocol constants
+const MAX_IPV4_PREFIX_LEN: u8 = 32;
+const MAX_IPV6_PREFIX_LEN: u8 = 128;
+const MAX_BGP_MESSAGE_SIZE: usize = 4096;
+
+/// Calculate bytes needed for prefix length using safe integer arithmetic
+fn prefix_bytes(plen: u8) -> Result<usize, BgpError> {
+    if plen > 32 {
+        return Err(BgpError::Message("Invalid prefix length".to_string()));
+    }
+    Ok((plen as usize + 7) / 8)
+}
+
 #[derive(Default, Builder, Debug, Clone, PartialEq)]
 #[builder(setter(into))]
 pub struct BGPMessageHeader {
@@ -221,9 +234,11 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
                 break;
             }
             let plen = src[i];
-            let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+            let plen_bytes = prefix_bytes(plen)?;
+            let end = i.checked_add(plen_bytes + 1)
+                .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             if end > src.len() {
-                break;
+                return Err(BgpError::Message("NLRI extends beyond buffer".to_string()));
             }
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
@@ -300,7 +315,9 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
         let mut routes: Vec<Nlri> = vec![];
         while i < total_len {
             let plen = src[i];
-            let end = i + (plen as f32 / 8.0).ceil() as usize + 1;
+            let plen_bytes = prefix_bytes(plen)?;
+            let end = i.checked_add(plen_bytes + 1)
+                .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
             };
@@ -658,5 +675,37 @@ mod tests {
 
         let msg: Message = msg_bytes.try_into().expect("Failed to parse BGP message");
         assert_eq!(msg.header.message_type, MessageType::Keepalive);
+    }
+
+    #[test]
+    fn test_prefix_bytes_validation() {
+        // Valid prefix lengths
+        assert_eq!(prefix_bytes(0).unwrap(), 0);
+        assert_eq!(prefix_bytes(1).unwrap(), 1);
+        assert_eq!(prefix_bytes(8).unwrap(), 1);
+        assert_eq!(prefix_bytes(9).unwrap(), 2);
+        assert_eq!(prefix_bytes(24).unwrap(), 3);
+        assert_eq!(prefix_bytes(32).unwrap(), 4);
+
+        // Invalid prefix length should return error
+        assert!(prefix_bytes(33).is_err());
+        assert!(prefix_bytes(255).is_err());
+    }
+
+    #[test]
+    fn test_bgp_update_malicious_prefix_length() {
+        // Create malicious BGP UPDATE with invalid prefix length
+        let mut malicious_update = vec![];
+        malicious_update.extend_from_slice(&[0, 0]); // No withdrawn routes
+        malicious_update.extend_from_slice(&[0, 0]); // No path attributes
+        malicious_update.push(255); // Invalid prefix length (> 32)
+        malicious_update.extend_from_slice(&[1, 2, 3, 4]); // Some octets
+
+        let result: Result<BGPUpdateMessage, BgpError> = malicious_update.try_into();
+        assert!(result.is_err());
+        
+        if let Err(BgpError::Message(msg)) = result {
+            assert!(msg.contains("Invalid prefix length"));
+        }
     }
 }
