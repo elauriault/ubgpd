@@ -15,6 +15,31 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
+pub(super) fn calculate_retry_delay(
+    base_retry_time: u16,
+    retry_counter: usize,
+    exponential_backoff: bool,
+) -> u64 {
+    let base_delay = if exponential_backoff {
+        let multiplier = 2_u64.pow(retry_counter.min(10) as u32);
+        (base_retry_time as u64).saturating_mul(multiplier).min(3600)
+    } else {
+        base_retry_time as u64
+    };
+    
+    // Add 10% jitter to prevent thundering herd
+    let jitter_range = base_delay / 10;
+    let jitter = (retry_counter as u64 * 1237) % (jitter_range + 1); // Pseudo-random
+    let total_delay = base_delay + jitter;
+    
+    // Ensure we never exceed 3600 seconds (1 hour) for exponential backoff
+    if exponential_backoff {
+        total_delay.min(3600)
+    } else {
+        total_delay
+    }
+}
+
 pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
     {
         let mut n = n.lock().await;
@@ -36,7 +61,7 @@ pub async fn connect(
         log::debug!("Neighbor ribtx set: {:?}", n.ribtx.keys());
     }
     // Extract remote address, local_ip, and local_asn from the neighbor
-    let (remote_addr, local_ip, local_asn) = {
+    let (remote_addr, _local_ip, _local_asn) = {
         let n = neighbor.lock().await;
         let remote_ip = n
             .remote_ip
@@ -56,18 +81,30 @@ pub async fn connect(
         Ok(sock) => sock,
         Err(e) => {
             log::error!("Failed to connect to {}: {}", remote_addr, e);
-            // Update neighbor state to Idle on connection failure
-            {
+            
+            let (should_retry, retry_delay) = {
                 let mut n = neighbor.lock().await;
                 n.attributes.state = BGPState::Idle;
                 n.attributes.connect_retry_counter += 1;
-            }
-            // Schedule retry
-            let retry = {
-                let n = neighbor.lock().await;
-                n.attributes.connect_retry_time
+                
+                let should_retry = match n.max_retry_count {
+                    Some(max) => n.attributes.connect_retry_counter < max as usize,
+                    None => true,
+                };
+                
+                let delay = calculate_retry_delay(
+                    n.attributes.connect_retry_time,
+                    n.attributes.connect_retry_counter,
+                    n.exponential_backoff,
+                );
+                
+                (should_retry, delay)
             };
-            tokio::time::sleep(Duration::from_secs(retry as u64)).await;
+            
+            if should_retry {
+                tokio::time::sleep(Duration::from_secs(retry_delay)).await;
+            }
+            
             return Err(anyhow!("Connection failed: {}", e));
         }
     };
@@ -481,3 +518,4 @@ pub async fn process_event_established(
     }
     Ok(())
 }
+

@@ -6,7 +6,6 @@ use thiserror::Error;
 // Constants
 pub const MARKER: [u8; 16] = [0xff; 16];
 pub const VERSION: u8 = 4;
-pub const MAX: usize = 4096;
 pub const MIN_MESSAGE_LENGTH: usize = 19;
 pub const MAX_MESSAGE_LENGTH: usize = 4096;
 
@@ -274,17 +273,6 @@ pub fn validate_router_id(router_id: u32) -> Result<(), BgpValidationError> {
     Ok(())
 }
 
-pub fn validate_nlri_prefix_length(prefix_len: u8, afi: &Afi) -> Result<(), BgpValidationError> {
-    let max_prefix_len = match afi {
-        Afi::Ipv4 => 32,
-        Afi::Ipv6 => 128,
-    };
-
-    if prefix_len > max_prefix_len {
-        return Err(BgpValidationError::InvalidNlriPrefixLength(prefix_len));
-    }
-    Ok(())
-}
 
 // Utility function for checking extended length bit in path attribute flags
 pub fn is_extended_len(mask: u8) -> bool {
@@ -315,194 +303,17 @@ pub fn safe_array<const N: usize>(
     Ok(array)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_constants() {
-        assert_eq!(MARKER.len(), 16);
-        assert!(MARKER.iter().all(|&b| b == 0xff));
-        assert_eq!(VERSION, 4);
-        assert_eq!(MIN_MESSAGE_LENGTH, 19);
-        assert_eq!(MAX_MESSAGE_LENGTH, 4096);
+/// Calculate bytes needed for prefix length with validation
+pub fn prefix_bytes(plen: u8, afi: &Afi) -> Result<usize, BgpValidationError> {
+    let max_len = match afi {
+        Afi::Ipv4 => 32,
+        Afi::Ipv6 => 128,
+    };
+    
+    if plen > max_len {
+        return Err(BgpValidationError::InvalidNlriPrefixLength(plen));
     }
-
-    #[test]
-    fn test_validate_message_length() {
-        assert!(validate_message_length(18).is_err());
-        assert!(validate_message_length(19).is_ok());
-        assert!(validate_message_length(1000).is_ok());
-        assert!(validate_message_length(4096).is_ok());
-        assert!(validate_message_length(4097).is_err());
-    }
-
-    #[test]
-    fn test_validate_marker() {
-        let good_marker = MARKER;
-        assert!(validate_marker(&good_marker).is_ok());
-
-        let mut bad_marker = MARKER;
-        bad_marker[0] = 0xfe;
-        assert!(validate_marker(&bad_marker).is_err());
-    }
-
-    #[test]
-    fn test_validate_bgp_version() {
-        assert!(validate_bgp_version(4).is_ok());
-        assert!(validate_bgp_version(3).is_err());
-        assert!(validate_bgp_version(5).is_err());
-    }
-
-    #[test]
-    fn test_validate_asn() {
-        assert!(validate_asn(0).is_err());
-        assert!(validate_asn(1).is_ok());
-        assert!(validate_asn(65535).is_ok());
-    }
-
-    #[test]
-    fn test_validate_hold_time() {
-        assert!(validate_hold_time(0).is_ok()); // 0 is valid (means don't send keepalives)
-        assert!(validate_hold_time(1).is_err());
-        assert!(validate_hold_time(2).is_err());
-        assert!(validate_hold_time(3).is_ok());
-        assert!(validate_hold_time(180).is_ok());
-        assert!(validate_hold_time(65535).is_ok());
-    }
-
-    #[test]
-    fn test_validate_router_id() {
-        assert!(validate_router_id(0).is_err());
-        assert!(validate_router_id(1).is_ok());
-        assert!(validate_router_id(0xFFFFFFFF).is_ok());
-    }
-
-    #[test]
-    fn test_validate_nlri_prefix_length() {
-        assert!(validate_nlri_prefix_length(0, &Afi::Ipv4).is_ok());
-        assert!(validate_nlri_prefix_length(32, &Afi::Ipv4).is_ok());
-        assert!(validate_nlri_prefix_length(33, &Afi::Ipv4).is_err());
-
-        assert!(validate_nlri_prefix_length(0, &Afi::Ipv6).is_ok());
-        assert!(validate_nlri_prefix_length(128, &Afi::Ipv6).is_ok());
-        assert!(validate_nlri_prefix_length(129, &Afi::Ipv6).is_err());
-    }
-
-    #[test]
-    fn test_is_extended_len() {
-        assert!(!is_extended_len(0b00000000)); // Extended bit not set
-        assert!(is_extended_len(0b00010000)); // Extended bit set
-        assert!(!is_extended_len(0b11100000)); // Extended bit not set
-        assert!(is_extended_len(0b11110000)); // Extended bit set
-    }
-
-    #[test]
-    fn test_safe_slice() {
-        let buffer = vec![1, 2, 3, 4, 5];
-
-        assert!(safe_slice(&buffer, 0, 3).is_ok());
-        assert_eq!(safe_slice(&buffer, 0, 3).unwrap(), &[1, 2, 3]);
-
-        assert!(safe_slice(&buffer, 2, 5).is_ok());
-        assert_eq!(safe_slice(&buffer, 2, 5).unwrap(), &[3, 4, 5]);
-
-        assert!(safe_slice(&buffer, 0, 6).is_err()); // End beyond buffer
-        assert!(safe_slice(&buffer, 3, 2).is_err()); // Start > end
-        assert!(safe_slice(&buffer, 6, 7).is_err()); // Start beyond buffer
-    }
-
-    #[test]
-    fn test_safe_array() {
-        let buffer = vec![1, 2, 3, 4, 5];
-
-        let arr: Result<[u8; 2], _> = safe_array(&buffer, 0);
-        assert!(arr.is_ok());
-        assert_eq!(arr.unwrap(), [1, 2]);
-
-        let arr: Result<[u8; 3], _> = safe_array(&buffer, 2);
-        assert!(arr.is_ok());
-        assert_eq!(arr.unwrap(), [3, 4, 5]);
-
-        let arr: Result<[u8; 3], _> = safe_array(&buffer, 3);
-        assert!(arr.is_err()); // Not enough bytes
-    }
-
-    #[test]
-    fn test_error_to_notification_codes() {
-        let err = BgpValidationError::InvalidMarker;
-        let (code, subcode) = err.to_notification_codes();
-        assert_eq!(code, ErrorCode::MessageHeader);
-        assert_eq!(subcode, HeaderSubCode::ConnectionNotSynchronized as u8);
-
-        let err = BgpValidationError::InvalidAsn(0);
-        let (code, subcode) = err.to_notification_codes();
-        assert_eq!(code, ErrorCode::OpenMessage);
-        assert_eq!(subcode, OpenSubCode::BadPeerAS as u8);
-
-        let err = BgpValidationError::MalformedAsPath("test".to_string());
-        let (code, subcode) = err.to_notification_codes();
-        assert_eq!(code, ErrorCode::UpdateMessage);
-        assert_eq!(subcode, UpdateSubCode::MalformedASPATH as u8);
-    }
-
-    #[test]
-    fn test_address_family_hash() {
-        use std::collections::HashSet;
-
-        let mut set = HashSet::new();
-        let af1 = AddressFamily {
-            afi: Afi::Ipv4,
-            safi: Safi::NLRIUnicast,
-        };
-        let af2 = AddressFamily {
-            afi: Afi::Ipv4,
-            safi: Safi::NLRIUnicast,
-        };
-        let af3 = AddressFamily {
-            afi: Afi::Ipv6,
-            safi: Safi::NLRIUnicast,
-        };
-
-        set.insert(af1.clone());
-        assert!(!set.insert(af2)); // Should return false (already exists)
-        assert!(set.insert(af3)); // Should return true (new)
-
-        assert_eq!(set.len(), 2);
-    }
-
-    #[test]
-    fn test_message_type_default() {
-        let msg_type = MessageType::default();
-        assert_eq!(msg_type, MessageType::Update);
-    }
-
-    #[test]
-    fn test_enum_from_primitive() {
-        use num_traits::FromPrimitive;
-
-        assert_eq!(Afi::from_u16(1), Some(Afi::Ipv4));
-        assert_eq!(Afi::from_u16(2), Some(Afi::Ipv6));
-        assert_eq!(Afi::from_u16(3), None);
-
-        assert_eq!(Safi::from_u8(1), Some(Safi::NLRIUnicast));
-        assert_eq!(Safi::from_u8(2), Some(Safi::NLRIMulticast));
-        assert_eq!(Safi::from_u8(3), None);
-
-        assert_eq!(MessageType::from_u8(1), Some(MessageType::Open));
-        assert_eq!(MessageType::from_u8(2), Some(MessageType::Update));
-        assert_eq!(MessageType::from_u8(3), Some(MessageType::Notification));
-        assert_eq!(MessageType::from_u8(4), Some(MessageType::Keepalive));
-        assert_eq!(MessageType::from_u8(5), None);
-    }
-
-    #[test]
-    fn test_validate_buffer_bounds() {
-        let buffer = vec![1, 2, 3, 4, 5];
-
-        assert!(validate_buffer_bounds(&buffer, 0, 5).is_ok());
-        assert!(validate_buffer_bounds(&buffer, 0, 6).is_err());
-        assert!(validate_buffer_bounds(&buffer, 5, 1).is_err());
-        assert!(validate_buffer_bounds(&buffer, 2, 3).is_ok());
-    }
+    
+    Ok((plen as usize).div_ceil(8))
 }
+

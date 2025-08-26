@@ -2,8 +2,6 @@
 #[cfg(test)]
 mod attributes_tests {
     use super::super::attributes::*;
-    use super::super::nlri::*;
-    use super::super::types::*;
     use std::net::Ipv4Addr;
     include!("../bgp/attributes_tests.rs");
 }
@@ -31,7 +29,6 @@ mod nlri_tests {
     use super::super::nlri::*;
     use super::super::types::*;
     use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-    use std::hash::Hash;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     include!("../bgp/nlri_tests.rs");
 }
@@ -42,4 +39,13 @@ mod types_tests {
     use num_traits::FromPrimitive;
     use std::collections::HashSet;
     include!("../bgp/types_tests.rs");
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use super::super::codec::*;
+    use super::super::types::*;
+    use bytes::BytesMut;
+    use tokio_util::codec::{Decoder, Encoder};
+    include!("../bgp/codec_tests.rs");
 }
