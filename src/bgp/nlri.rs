@@ -23,11 +23,6 @@ pub struct Ipv6Octets {
     pub octets: Vec<u8>,
 }
 
-/// Returns the number of bytes needed to represent a prefix of length `plen`.
-pub fn prefix_bytes(plen: u8) -> usize {
-    (plen as usize).div_ceil(8)
-}
-
 impl From<Nlri> for Vec<u8> {
     fn from(val: Nlri) -> Self {
         let mut buf = Cursor::new(vec![]);

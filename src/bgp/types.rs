@@ -240,6 +240,25 @@ pub fn is_extended_len(mask: u8) -> bool {
     !matches!(mask & 0b0001, 0)
 }
 
+/// Calculate bytes needed to represent a prefix of given length
+pub fn prefix_bytes(plen: u8) -> usize {
+    (plen as usize).div_ceil(8)
+}
+
+/// Validate prefix length based on address family
+pub fn validate_prefix_length_afi(prefix_len: u8, afi: &Afi) -> Result<(), BgpValidationError> {
+    let max_len = match afi {
+        Afi::Ipv4 => 32,
+        Afi::Ipv6 => 128,
+    };
+    
+    if prefix_len > max_len {
+        return Err(BgpValidationError::InvalidNlriPrefixLength(prefix_len));
+    }
+    
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
