@@ -17,18 +17,6 @@ use super::capabilities::*;
 use super::nlri::*;
 use super::types::*;
 
-// BGP protocol constants
-const MAX_IPV4_PREFIX_LEN: u8 = 32;
-const MAX_IPV6_PREFIX_LEN: u8 = 128;
-const MAX_BGP_MESSAGE_SIZE: usize = 4096;
-
-/// Calculate bytes needed for prefix length using safe integer arithmetic
-fn prefix_bytes(plen: u8) -> Result<usize, BgpError> {
-    if plen > 32 {
-        return Err(BgpError::Message("Invalid prefix length".to_string()));
-    }
-    Ok((plen as usize + 7) / 8)
-}
 
 #[derive(Default, Builder, Debug, Clone, PartialEq)]
 #[builder(setter(into))]
@@ -234,7 +222,8 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
                 break;
             }
             let plen = src[i];
-            let plen_bytes = prefix_bytes(plen)?;
+            validate_prefix_length_afi(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
+            let plen_bytes = prefix_bytes(plen);
             let end = i.checked_add(plen_bytes + 1)
                 .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             if end > src.len() {
@@ -315,7 +304,8 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
         let mut routes: Vec<Nlri> = vec![];
         while i < total_len {
             let plen = src[i];
-            let plen_bytes = prefix_bytes(plen)?;
+            validate_prefix_length_afi(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
+            let plen_bytes = prefix_bytes(plen);
             let end = i.checked_add(plen_bytes + 1)
                 .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             let buf = Ipv4Octets {
@@ -678,18 +668,24 @@ mod tests {
     }
 
     #[test]
-    fn test_prefix_bytes_validation() {
-        // Valid prefix lengths
-        assert_eq!(prefix_bytes(0).unwrap(), 0);
-        assert_eq!(prefix_bytes(1).unwrap(), 1);
-        assert_eq!(prefix_bytes(8).unwrap(), 1);
-        assert_eq!(prefix_bytes(9).unwrap(), 2);
-        assert_eq!(prefix_bytes(24).unwrap(), 3);
-        assert_eq!(prefix_bytes(32).unwrap(), 4);
+    fn test_prefix_validation() {
+        use crate::bgp::types::*;
+        
+        // Valid IPv4 prefix lengths
+        assert!(validate_prefix_length_afi(0, &Afi::Ipv4).is_ok());
+        assert!(validate_prefix_length_afi(24, &Afi::Ipv4).is_ok());
+        assert!(validate_prefix_length_afi(32, &Afi::Ipv4).is_ok());
 
-        // Invalid prefix length should return error
-        assert!(prefix_bytes(33).is_err());
-        assert!(prefix_bytes(255).is_err());
+        // Invalid IPv4 prefix lengths
+        assert!(validate_prefix_length_afi(33, &Afi::Ipv4).is_err());
+        assert!(validate_prefix_length_afi(255, &Afi::Ipv4).is_err());
+        
+        // Valid IPv6 prefix lengths
+        assert!(validate_prefix_length_afi(64, &Afi::Ipv6).is_ok());
+        assert!(validate_prefix_length_afi(128, &Afi::Ipv6).is_ok());
+        
+        // Invalid IPv6 prefix lengths
+        assert!(validate_prefix_length_afi(129, &Afi::Ipv6).is_err());
     }
 
     #[test]
@@ -705,7 +701,9 @@ mod tests {
         assert!(result.is_err());
         
         if let Err(BgpError::Message(msg)) = result {
-            assert!(msg.contains("Invalid prefix length"));
+            assert!(msg.contains("Invalid NLRI prefix length"));
+        } else {
+            panic!("Expected BgpError::Message");
         }
     }
 }
