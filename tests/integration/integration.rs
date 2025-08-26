@@ -1,3 +1,5 @@
+use std::process::Command;
+
 #[tokio::test]
 async fn gobgp_routes_reachable_from_frr() {
     let client = reqwest::Client::new();
