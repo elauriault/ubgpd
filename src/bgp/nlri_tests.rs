@@ -211,18 +211,20 @@ fn test_mpnlri_ipv6_valid() {
 
 #[test]
 fn test_prefix_bytes_calculation_valid() {
-    assert_eq!(prefix_bytes(0), 0);
-    assert_eq!(prefix_bytes(1), 1);
-    assert_eq!(prefix_bytes(8), 1);
-    assert_eq!(prefix_bytes(9), 2);
-    assert_eq!(prefix_bytes(16), 2);
-    assert_eq!(prefix_bytes(17), 3);
-    assert_eq!(prefix_bytes(24), 3);
-    assert_eq!(prefix_bytes(25), 4);
-    assert_eq!(prefix_bytes(32), 4);
-    assert_eq!(prefix_bytes(33), 5);
-    assert_eq!(prefix_bytes(64), 8);
-    assert_eq!(prefix_bytes(128), 16);
+    use crate::bgp::types::*;
+    assert_eq!(prefix_bytes(0, &Afi::Ipv4).unwrap(), 0);
+    assert_eq!(prefix_bytes(1, &Afi::Ipv4).unwrap(), 1);
+    assert_eq!(prefix_bytes(8, &Afi::Ipv4).unwrap(), 1);
+    assert_eq!(prefix_bytes(9, &Afi::Ipv4).unwrap(), 2);
+    assert_eq!(prefix_bytes(16, &Afi::Ipv4).unwrap(), 2);
+    assert_eq!(prefix_bytes(17, &Afi::Ipv4).unwrap(), 3);
+    assert_eq!(prefix_bytes(24, &Afi::Ipv4).unwrap(), 3);
+    assert_eq!(prefix_bytes(25, &Afi::Ipv4).unwrap(), 4);
+    assert_eq!(prefix_bytes(32, &Afi::Ipv4).unwrap(), 4);
+    assert_eq!(prefix_bytes(64, &Afi::Ipv6).unwrap(), 8);
+    assert_eq!(prefix_bytes(128, &Afi::Ipv6).unwrap(), 16);
+    assert!(prefix_bytes(33, &Afi::Ipv4).is_err());
+    assert!(prefix_bytes(129, &Afi::Ipv6).is_err());
 }
 #[test]
 fn test_nlri_from_empty_ipv4_octets_invalid() {

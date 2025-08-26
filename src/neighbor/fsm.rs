@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
-fn calculate_retry_delay(
+pub(super) fn calculate_retry_delay(
     base_retry_time: u16,
     retry_counter: usize,
     exponential_backoff: bool,
@@ -28,7 +28,12 @@ fn calculate_retry_delay(
     };
     let jitter_range = base_delay / 10;
     let jitter = (retry_counter as u64 * 1237) % (jitter_range + 1); // Pseudo-random
-    base_delay + jitter
+    let total_delay = base_delay + jitter;
+    if exponential_backoff {
+        total_delay.min(3600)
+    } else {
+        total_delay
+    }
 }
 
 pub async fn init_peer(n: Arc<Mutex<BGPNeighbor>>) {
@@ -50,7 +55,7 @@ pub async fn connect(
         n.ribtx = sp.ribtx.clone();
         log::debug!("Neighbor ribtx set: {:?}", n.ribtx.keys());
     }
-    let (remote_addr, local_ip, local_asn) = {
+    let (remote_addr, _local_ip, _local_asn) = {
         let n = neighbor.lock().await;
         let remote_ip = n
             .remote_ip
@@ -492,33 +497,3 @@ pub async fn process_event_established(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_calculate_retry_delay_fixed() {
-        let delay1 = calculate_retry_delay(10, 0, false);
-        let delay2 = calculate_retry_delay(10, 3, false);
-        
-        assert!(delay1 >= 10 && delay1 <= 11);
-        assert!(delay2 >= 10 && delay2 <= 11);
-    }
-
-    #[test]
-    fn test_calculate_retry_delay_exponential() {
-        let delay1 = calculate_retry_delay(5, 0, true);
-        let delay2 = calculate_retry_delay(5, 1, true);
-        let delay3 = calculate_retry_delay(5, 2, true);
-        
-        assert!(delay1 >= 5 && delay1 <= 5);
-        assert!(delay2 >= 10 && delay2 <= 11);
-        assert!(delay3 >= 20 && delay3 <= 22);
-    }
-
-    #[test]
-    fn test_exponential_backoff_caps_at_max() {
-        let delay = calculate_retry_delay(60, 20, true);
-        assert!(delay <= 3600);
-    }
-}

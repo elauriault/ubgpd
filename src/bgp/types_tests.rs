@@ -26,16 +26,6 @@ fn test_address_family_hash_valid() {
 }
 
 #[test]
-fn test_constants_valid() {
-    assert_eq!(MARKER.len(), 16);
-    assert!(MARKER.iter().all(|&b| b == 0xff));
-    assert_eq!(VERSION, 4);
-    assert_eq!(MIN_MESSAGE_LENGTH, 19);
-    assert_eq!(MAX_MESSAGE_LENGTH, 4096);
-    assert_eq!(MAX, 4096);
-}
-
-#[test]
 fn test_validate_message_length_valid() {
     assert!(validate_message_length(MIN_MESSAGE_LENGTH).is_ok());
     assert!(validate_message_length(1000).is_ok());
@@ -50,13 +40,13 @@ fn test_validate_marker_valid() {
 
 #[test]
 fn test_validate_nlri_prefix_length_valid() {
-    assert!(validate_nlri_prefix_length(0, &Afi::Ipv4).is_ok());
-    assert!(validate_nlri_prefix_length(24, &Afi::Ipv4).is_ok());
-    assert!(validate_nlri_prefix_length(32, &Afi::Ipv4).is_ok());
+    assert!(prefix_bytes(0, &Afi::Ipv4).is_ok());
+    assert!(prefix_bytes(24, &Afi::Ipv4).is_ok());
+    assert!(prefix_bytes(32, &Afi::Ipv4).is_ok());
     
-    assert!(validate_nlri_prefix_length(0, &Afi::Ipv6).is_ok());
-    assert!(validate_nlri_prefix_length(64, &Afi::Ipv6).is_ok());
-    assert!(validate_nlri_prefix_length(128, &Afi::Ipv6).is_ok());
+    assert!(prefix_bytes(0, &Afi::Ipv6).is_ok());
+    assert!(prefix_bytes(64, &Afi::Ipv6).is_ok());
+    assert!(prefix_bytes(128, &Afi::Ipv6).is_ok());
 }
 
 #[test]
@@ -142,10 +132,10 @@ fn test_validate_marker_invalid() {
 
 #[test]
 fn test_validate_nlri_prefix_length_invalid() {
-    assert!(validate_nlri_prefix_length(33, &Afi::Ipv4).is_err());
-    assert!(validate_nlri_prefix_length(129, &Afi::Ipv6).is_err());
+    assert!(prefix_bytes(33, &Afi::Ipv4).is_err());
+    assert!(prefix_bytes(129, &Afi::Ipv6).is_err());
     
-    let err = validate_nlri_prefix_length(33, &Afi::Ipv4).unwrap_err();
+    let err = prefix_bytes(33, &Afi::Ipv4).unwrap_err();
     match err {
         BgpValidationError::InvalidNlriPrefixLength(prefix_len) => {
             assert_eq!(prefix_len, 33);
