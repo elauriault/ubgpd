@@ -57,6 +57,14 @@ fn default_keepalive_interval() -> Option<u16> {
     Some(60)
 }
 
+fn default_max_retry_count() -> Option<u16> {
+    None
+}
+
+fn default_exponential_backoff() -> bool {
+    false
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Neighbor {
     /// Autonomous System Number (ASN) of the neighbor.
@@ -77,6 +85,12 @@ pub struct Neighbor {
     /// Keepalive interval for BGP connections to the neighbor.
     #[serde(default = "default_keepalive_interval")]
     pub keepalive_interval: Option<u16>,
+    /// Maximum retry attempts before giving up.
+    #[serde(default = "default_max_retry_count")]
+    pub max_retry_count: Option<u16>,
+    /// Enable exponential backoff for connection retries.
+    #[serde(default = "default_exponential_backoff")]
+    pub exponential_backoff: bool,
 }
 
 // impl Default for Neighbor {
