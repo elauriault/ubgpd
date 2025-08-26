@@ -8,6 +8,9 @@ mod session;
 mod timers;
 mod types;
 
+#[cfg(test)]
+mod fsm_tests;
+
 pub use capabilities::Capabilities;
 pub use fsm::{connect, fsm_tcp};
 pub use session::BGPNeighbor;

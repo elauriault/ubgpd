@@ -52,6 +52,8 @@ pub struct BGPNeighbor {
     pub tx: Option<tokio::sync::mpsc::Sender<super::types::Event>>,
     pub ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<speaker::RibEvent>>,
     pub attributes: BGPSessionAttributes,
+    pub max_retry_count: Option<u16>,
+    pub exponential_backoff: bool,
 }
 
 impl BGPNeighbor {
@@ -69,6 +71,8 @@ impl BGPNeighbor {
         state: BGPState,
         families: Option<Vec<bgp::AddressFamily>>,
         ribtx: HashMap<bgp::AddressFamily, tokio::sync::mpsc::Sender<speaker::RibEvent>>,
+        max_retry_count: Option<u16>,
+        exponential_backoff: bool,
     ) -> Self {
         let tx = None;
         let attributes = BGPSessionAttributesBuilder::default()
@@ -97,6 +101,8 @@ impl BGPNeighbor {
             tx,
             ribtx,
             attributes,
+            max_retry_count,
+            exponential_backoff,
         }
     }
 

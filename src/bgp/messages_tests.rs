@@ -477,7 +477,7 @@ fn test_message_all_types_valid() {
 #[test]
 fn test_message_round_trip_serialization_valid() {
     let original_body = BGPKeepaliveMessage::new().unwrap();
-    let original_msg = Message::new(MessageType::Keepalive, BGPMessageBody::Keepalive(original_body)).unwrap();
+    let _original_msg = Message::new(MessageType::Keepalive, BGPMessageBody::Keepalive(original_body)).unwrap();
     let mut complete_msg = vec![];
     complete_msg.extend_from_slice(&MARKER); 
     complete_msg.extend_from_slice(&[0, 19]);

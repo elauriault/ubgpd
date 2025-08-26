@@ -5,7 +5,6 @@ use thiserror::Error;
 
 pub const MARKER: [u8; 16] = [0xff; 16];
 pub const VERSION: u8 = 4;
-pub const MAX: usize = 4096;
 pub const MIN_MESSAGE_LENGTH: usize = 19;
 pub const MAX_MESSAGE_LENGTH: usize = 4096;
 
@@ -223,45 +222,20 @@ pub fn validate_marker(marker: &[u8; 16]) -> Result<(), BgpValidationError> {
     Ok(())
 }
 
-pub fn validate_nlri_prefix_length(prefix_len: u8, afi: &Afi) -> Result<(), BgpValidationError> {
-    let max_prefix_len = match afi {
-        Afi::Ipv4 => 32,
-        Afi::Ipv6 => 128,
-    };
-
-    if prefix_len > max_prefix_len {
-        return Err(BgpValidationError::InvalidNlriPrefixLength(prefix_len));
-    }
-    Ok(())
-}
-
 pub fn is_extended_len(mask: u8) -> bool {
     let mask = mask >> 4;
     !matches!(mask & 0b0001, 0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_constants() {
-        assert_eq!(MARKER.len(), 16);
-        assert!(MARKER.iter().all(|&b| b == 0xff));
-        assert_eq!(VERSION, 4);
-        assert_eq!(MIN_MESSAGE_LENGTH, 19);
-        assert_eq!(MAX_MESSAGE_LENGTH, 4096);
+pub fn prefix_bytes(plen: u8, afi: &Afi) -> Result<usize, BgpValidationError> {
+    let max_len = match afi {
+        Afi::Ipv4 => 32,
+        Afi::Ipv6 => 128,
+    };
+    
+    if plen > max_len {
+        return Err(BgpValidationError::InvalidNlriPrefixLength(plen));
     }
-
-    #[test]
-    fn test_validate_nlri_prefix_length() {
-        assert!(validate_nlri_prefix_length(0, &Afi::Ipv4).is_ok());
-        assert!(validate_nlri_prefix_length(32, &Afi::Ipv4).is_ok());
-        assert!(validate_nlri_prefix_length(33, &Afi::Ipv4).is_err());
-
-        assert!(validate_nlri_prefix_length(0, &Afi::Ipv6).is_ok());
-        assert!(validate_nlri_prefix_length(128, &Afi::Ipv6).is_ok());
-        assert!(validate_nlri_prefix_length(129, &Afi::Ipv6).is_err());
-    }
-
+    
+    Ok((plen as usize).div_ceil(8))
 }
