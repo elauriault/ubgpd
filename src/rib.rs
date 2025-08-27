@@ -122,15 +122,15 @@ impl RouteAttributes {
             next_hop = Some(n)
         };
 
-        let next_hop = next_hop.unwrap();
+        let next_hop = next_hop.expect("BUG: Next hop should be available for route attributes");
         let remote_asn;
         let peer_rid;
         let peer_ip;
         {
             let nb = nb.lock().await;
-            remote_asn = nb.remote_asn.unwrap();
-            peer_rid = nb.remote_rid.unwrap();
-            peer_ip = nb.remote_ip.unwrap();
+            remote_asn = nb.remote_asn.expect("BUG: Remote ASN should be set after BGP session establishment");
+            peer_rid = nb.remote_rid.expect("BUG: Remote RID should be set after BGP session establishment");
+            peer_ip = nb.remote_ip.expect("BUG: Remote IP should be set after BGP session establishment");
         }
 
         let peer_type;

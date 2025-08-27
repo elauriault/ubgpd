@@ -50,7 +50,7 @@ impl BGPSpeaker {
             .ribtx(HashMap::new())
             .neighbors(vec![])
             .build()
-            .unwrap()
+            .expect("BUG: Failed to build BGPSpeaker with valid parameters")
     }
     pub async fn add_neighbor(
         &mut self,
@@ -62,11 +62,11 @@ impl BGPSpeaker {
             None,
             self.local_asn,
             self.router_id,
-            Some(config.ip.parse().unwrap()),
+            Some(config.ip.parse().expect("Invalid neighbor IP address in configuration")),
             Some(config.port),
             Some(config.asn),
-            config.hold_time.unwrap(),
-            config.connect_retry.unwrap(),
+            config.hold_time.expect("Hold time not configured for neighbor"),
+            config.connect_retry.expect("Connect retry time not configured for neighbor"),
             neighbor::BGPState::Idle,
             config.families,
             ribtx,
