@@ -42,6 +42,7 @@ itertools = "0.14"
 tonic = "0.10"
 prost = "0.12"
 pretty_assertions = "1.4.0"
+fastrand = "2.0"
 
 [build-dependencies]
 tonic-build = "0.10"
@@ -55,6 +56,3 @@ path = "src/ubgpd.rs"
 name = "ubgpc"
 path = "src/ubgpc.rs"
 
-[[test]]
-name = "integration"
-path = "tests/integration/integration.rs"

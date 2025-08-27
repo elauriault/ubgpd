@@ -27,7 +27,7 @@ pub(super) fn calculate_retry_delay(
         base_retry_time as u64
     };
     let jitter_range = base_delay / 10;
-    let jitter = (retry_counter as u64 * 1237) % (jitter_range + 1); // Pseudo-random
+    let jitter = fastrand::u64(0..=jitter_range);
     let total_delay = base_delay + jitter;
     if exponential_backoff {
         total_delay.min(3600)
