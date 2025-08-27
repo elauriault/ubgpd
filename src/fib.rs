@@ -1,3 +1,4 @@
+use anyhow::Context;
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -20,22 +21,30 @@ use crate::rib::{self};
 pub struct FibEntry {
     prefix: Option<IpNet>,
     next_hop: Option<IpAddr>,
-    dev: String,
+    dev: Option<String>,
     metric: Option<u32>,
     proto: RouteProtocol,
     rm: RouteMessage,
 }
 
 impl FibEntry {
-    async fn from_rtnl(msg: RouteMessage) -> FibEntry {
-        let (connection, handle, _) = new_connection().unwrap();
+    async fn from_rtnl(msg: RouteMessage) -> Option<FibEntry> {
+        let (connection, handle, _) = new_connection()
+            .map_err(|e| log::error!("Failed to create netlink connection: {}", e))
+            .ok()?;
         tokio::spawn(connection);
         let plen = msg.header.destination_prefix_length;
         let prefix = msg.attributes.iter().find_map(|nla| {
             if let RouteAttribute::Destination(v) = nla {
                 match v {
-                    RouteAddress::Inet(t) => Some(Ipv4Net::new(*t, plen).unwrap().into()),
-                    RouteAddress::Inet6(t) => Some(Ipv6Net::new(*t, plen).unwrap().into()),
+                    RouteAddress::Inet(t) => Ipv4Net::new(*t, plen)
+                        .map_err(|e| log::warn!("Invalid IPv4 prefix: {}", e))
+                        .ok()
+                        .map(|net| net.into()),
+                    RouteAddress::Inet6(t) => Ipv6Net::new(*t, plen)
+                        .map_err(|e| log::warn!("Invalid IPv6 prefix: {}", e))
+                        .ok()
+                        .map(|net| net.into()),
                     _ => None,
                 }
             } else {
@@ -60,7 +69,19 @@ impl FibEntry {
                 None
             }
         });
-        let dev = get_link_name(handle, dev.unwrap()).await;
+        let dev = match dev {
+            Some(dev_id) => match get_link_name(handle, dev_id).await {
+                Ok(name) => Some(name),
+                Err(e) => {
+                    log::error!("Failed to get link name for device {}: {} (route will be skipped)", dev_id, e);
+                    return None;
+                }
+            }
+            None => {
+                log::debug!("Route has no output interface specified");
+                None
+            }
+        };
         let metric = msg.attributes.iter().find_map(|nla| {
             if let RouteAttribute::Metrics(_v) = nla {
                 // Some(*v)
@@ -70,14 +91,14 @@ impl FibEntry {
             }
         });
         let proto = msg.header.protocol;
-        FibEntry {
+        Some(FibEntry {
             prefix,
             next_hop,
             dev,
             metric,
             proto,
             rm: msg,
-        }
+        })
     }
 }
 
@@ -101,7 +122,13 @@ impl Fib {
     }
 
     pub async fn sync(&mut self, rib: Arc<Mutex<rib::Rib>>) {
-        let (connection, handle, _) = new_connection().unwrap();
+        let (connection, handle, _) = match new_connection() {
+            Ok(conn) => conn,
+            Err(e) => {
+                log::error!("Failed to create netlink connection for FIB sync: {}", e);
+                return;
+            }
+        };
         tokio::spawn(connection);
         {
             let rib = rib.lock().await;
@@ -204,21 +231,28 @@ impl Fib {
         };
         // let mut v: Vec<RouteMessage> = vec![];
         let mut v = vec![];
-        while let Some(route) = routes.try_next().await.unwrap_or(None) {
+        while let Some(route) = routes.try_next().await.unwrap_or_else(|e| {
+            log::error!("Failed to read route from netlink: {}", e);
+            None
+        }) {
             v.push(route);
         }
-        stream::iter(v.clone())
+        let all_results: Vec<Option<FibEntry>> = stream::iter(v.clone())
             .then(FibEntry::from_rtnl)
-            .collect::<Vec<FibEntry>>()
-            .await
+            .collect()
+            .await;
+
+        all_results.into_iter().flatten().collect()
     }
 }
 
-async fn get_link_name(handle: Handle, index: u32) -> String {
+async fn get_link_name(handle: Handle, index: u32) -> Result<String, anyhow::Error> {
     let mut links = handle.link().get().match_index(index).execute();
-    let msg = links.try_next().await.unwrap().unwrap();
+    let msg = links.try_next().await
+        .context("Failed to get link information")?
+        .context("No link found with specified index")?;
 
-    msg.attributes
+    Ok(msg.attributes
         .iter()
         .find_map(|nla| {
             if let LinkAttribute::IfName(v) = nla {
@@ -227,7 +261,7 @@ async fn get_link_name(handle: Handle, index: u32) -> String {
                 None
             }
         })
-        .unwrap()
+        .context("Link has no interface name")?)
 }
 
 // #[cfg(test)]
