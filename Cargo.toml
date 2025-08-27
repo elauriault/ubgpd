@@ -54,3 +54,7 @@ path = "src/ubgpd.rs"
 [[bin]]
 name = "ubgpc"
 path = "src/ubgpc.rs"
+
+[[test]]
+name = "integration"
+path = "tests/integration/integration.rs"
