@@ -11,10 +11,9 @@
 
 ```
 cargo build
+docker-compose -f tests/integration/docker-compose-dev.yml up -d
+tests/integration/integration_test.sh
 docker-compose -f tests/integration/docker-compose-dev.yml down --volumes --remove-orphans
-cargo test --test integration
-docker-compose -f tests/integration/docker-compose-dev.yml up
-
 ```
 
 ## License
