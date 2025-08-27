@@ -39,9 +39,13 @@ async fn main() -> Result<()> {
     config.port = config.port.or(Some(config::BGP_DEFAULT_PORT));
 
     config.localips = config.localips.or_else(|| {
-        Some(vec![config::BGP_DEFAULT_LOCAL_IP
-            .parse()
-            .expect("Failed to parse default IP")]) // Consider handling this error better
+        match config::BGP_DEFAULT_LOCAL_IP.parse() {
+            Ok(ip) => Some(vec![ip]),
+            Err(e) => {
+                log::error!("Failed to parse default IP '{}': {}", config::BGP_DEFAULT_LOCAL_IP, e);
+                None
+            }
+        }
     });
 
     config.families = config.families.or_else(|| {
@@ -52,24 +56,30 @@ async fn main() -> Result<()> {
         Some(vec![a])
     });
 
-    let families = config.families.clone();
+    let families = config.families.clone().unwrap_or_default();
+    
+    // Validate required configuration
+    let hold_time = config.hold_time.context("Hold time not configured")?;
+    let local_ips = config.localips.context("Local IPs not configured")?;
+    let port = config.port.context("Port not configured")?;
+    
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(
         config.asn,
         u32::from(config.rid),
-        config.hold_time.unwrap(),
-        config.localips.unwrap(),
-        config.port.unwrap(),
-        families.unwrap(),
+        hold_time,
+        local_ips,
+        port,
+        families,
     )));
 
-    {
-        let neighbors = config.neighbors.unwrap();
+    // Configure neighbors if any are specified
+    if let Some(neighbors) = config.neighbors {
         let mut speaker = speaker.lock().await;
         for mut n in neighbors {
             let families = config.families.clone();
             n.families = match n.families {
                 Some(i) => Some(i),
-                None => families.clone(),
+                None => families,
             };
             n.hold_time = match n.hold_time {
                 Some(i) => Some(i),
@@ -77,6 +87,8 @@ async fn main() -> Result<()> {
             };
             speaker.add_neighbor(n, HashMap::new()).await;
         }
+    } else {
+        log::info!("No neighbors configured, BGP speaker will accept incoming connections only");
     }
 
     let s1 = speaker.clone();

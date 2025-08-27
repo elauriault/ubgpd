@@ -128,11 +128,10 @@ pub async fn process_message_active(
     match m.body {
         bgp::BGPMessageBody::Open(body) => {
             log::debug!("FSM ACTIVE: Open {}", body);
-            let tx;
-            {
+            let tx = {
                 let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
-            }
+                n.tx.clone().context("Neighbor TX channel not initialized")?
+            };
             match collision_detection(body.clone(), s).await {
                 true => {
                     tx.send(Event::OpenCollisionDump)
@@ -149,11 +148,10 @@ pub async fn process_message_active(
                     }
                     true => {
                         update_from_open(body.clone(), nb.clone()).await;
-                        let ta;
-                        {
+                        let ta = {
                             let n = nb.lock().await;
-                            ta = n.tx.clone().unwrap();
-                        }
+                            n.tx.clone().context("Neighbor TX channel not initialized")?
+                        };
                         tokio::spawn(async {
                             timers::timer_keepalive(nb, ta).await;
                         });
@@ -202,19 +200,23 @@ pub async fn process_message_openconfirm(
             {
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::Established;
-                log::info!("Established BGP neigborship with {}", n.remote_ip.unwrap());
+                if let Some(remote_ip) = n.remote_ip {
+                    log::info!("Established BGP neighborship with {}", remote_ip);
+                } else {
+                    log::info!("Established BGP neighborship with unknown peer");
+                }
                 send_locrib(s.clone(), n.clone()).await;
             }
             log::debug!("FSM OpenConfirm to Established");
             Ok(())
         }
         bgp::BGPMessageBody::Notification(_body) => {
-            let tx;
-            {
+            let tx = {
                 let n = nb.lock().await;
-                tx = n.tx.clone().unwrap();
-            }
-            tx.send(Event::NotifMsg).await.unwrap();
+                n.tx.clone().context("Neighbor TX channel not initialized")?
+            };
+            tx.send(Event::NotifMsg).await
+                .context("Failed to send notification event")?;
             Ok(())
         }
         _ => {
@@ -444,19 +446,27 @@ pub async fn update_from_open(message: bgp::BGPOpenMessage, neighbor: Arc<Mutex<
 }
 
 pub async fn send_locrib(s: Arc<Mutex<speaker::BGPSpeaker>>, nb: BGPNeighbor) {
-    let adv = nb.capabilities_advertised.multiprotocol.unwrap().clone();
-    let rec = nb.capabilities_received.multiprotocol.unwrap().clone();
+    let adv = nb.capabilities_advertised.multiprotocol
+        .expect("BUG: Advertised capabilities should be set before BGP establishment");
+    let rec = nb.capabilities_received.multiprotocol
+        .expect("BUG: Received capabilities should be set after processing OPEN message");
 
     for af in adv {
         if rec.contains(&af) {
             let s = s.lock().await;
-            let r = s.rib.get(&af).unwrap().lock().await;
+            let r = s.rib.get(&af)
+                .expect("BUG: RIB should exist for negotiated address family")
+                .lock().await;
             let routes: Vec<(Nlri, Option<RouteAttributes>)> = r
                 .iter()
-                .map(|(n, a)| (*n, Some(a.first().unwrap().clone())))
+                .map(|(n, a)| (*n, Some(a.first()
+                    .expect("BUG: RIB entry should have at least one route attribute")
+                    .clone())))
                 .collect();
-            let tx = nb.tx.clone();
-            tx.unwrap().send(Event::RibUpdate(routes)).await.unwrap();
+            let tx = nb.tx.clone()
+                .expect("BUG: Neighbor TX channel should be initialized before establishment");
+            tx.send(Event::RibUpdate(routes)).await
+                .expect("BUG: Failed to send RIB update to established neighbor");
         }
     }
 }
@@ -533,7 +543,7 @@ pub async fn handle_update(
     }
     {
         let nb = nb.lock().await;
-        msg.rid = nb.remote_rid.unwrap();
+        msg.rid = nb.remote_rid.expect("BUG: Remote RID should be set after processing OPEN message");
         if let Some(tx) = nb.ribtx.get(&af) {
             let _ = tx.send(speaker::RibEvent::UpdateRoutes(msg)).await;
         } else {

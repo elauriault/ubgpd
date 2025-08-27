@@ -72,7 +72,8 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
                 // Update the existing neighbor with connection details
                 {
                     let mut n = existing_neighbor.lock().await;
-                    let local_addr = socket.local_addr().unwrap();
+                    let local_addr = socket.local_addr()
+                        .expect("BUG: Socket should have a local address after accept");
                     n.local_ip = Some(local_addr.ip());
                     n.local_port = Some(local_addr.port());
                     n.attributes.state = neighbor::BGPState::Active;

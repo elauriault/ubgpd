@@ -314,10 +314,12 @@ pub async fn process_event_connect(
 ) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await.unwrap();
+            connection::send_keepalive(server).await
+                .context("Failed to send keepalive in CONNECT state")?;
         }
         Event::ManualStart => {
-            connection::send_keepalive(server).await.unwrap();
+            connection::send_keepalive(server).await
+                .context("Failed to send keepalive on manual start")?;
         }
         Event::AutomaticStart => {
             init_peer(nb).await;
@@ -339,7 +341,7 @@ pub async fn process_event_connect(
             }
             connection::send_open(server, asn, rid, hold, capabilities)
                 .await
-                .unwrap();
+                .context("Failed to send OPEN message in CONNECT state")?;
             {
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::OpenSent;
@@ -389,7 +391,7 @@ pub async fn process_event_active(
             }
             connection::send_open(server, asn, rid, hold, capabilities)
                 .await
-                .unwrap();
+                .context("Failed to send OPEN message in ACTIVE state")?;
             {
                 let mut n = nb.lock().await;
                 n.attributes.state = BGPState::OpenSent;
@@ -448,7 +450,8 @@ pub async fn process_event_openconfirm(
 ) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await.unwrap();
+            connection::send_keepalive(server).await
+                .context("Failed to send keepalive in OPENCONFIRM state")?;
         }
         Event::TcpConnectionFails => {
             log::debug!("FSM OPENCONFIRM: {:?} to be implemented", e);
@@ -473,7 +476,7 @@ pub async fn process_event_openconfirm(
             }
             connection::send_open(server, asn, rid, hold, capabilities)
                 .await
-                .unwrap();
+                .context("Failed to send OPEN message in OPENCONFIRM state")?;
         }
         _ => {
             log::debug!("FSM OPENCONFIRM: {:?} looks like an error", e);
@@ -507,7 +510,8 @@ pub async fn process_event_established(
             log::info!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await.unwrap();
+            connection::send_keepalive(server).await
+                .context("Failed to send keepalive in ESTABLISHED state")?;
         }
         Event::RibUpdate(nlris) => {
             let _ = connection::send_update(server, nb.clone(), nlris).await;
