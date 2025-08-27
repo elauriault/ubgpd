@@ -29,7 +29,7 @@ pub(super) fn calculate_retry_delay(
     
     // Add 10% jitter to prevent thundering herd
     let jitter_range = base_delay / 10;
-    let jitter = (retry_counter as u64 * 1237) % (jitter_range + 1); // Pseudo-random
+    let jitter = fastrand::u64(0..=jitter_range);
     let total_delay = base_delay + jitter;
     
     // Ensure we never exceed 3600 seconds (1 hour) for exponential backoff
