@@ -91,6 +91,7 @@ fn default_exponential_backoff() -> bool {
     false
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct Neighbor {
     /// Autonomous System Number (ASN) of the neighbor.

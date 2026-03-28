@@ -11,7 +11,7 @@ use netlink_packet_route::link::LinkAttribute;
 // use netlink_packet_route::route::nlas::Nla as rnla;
 // use netlink_packet_route::route::message::RouteMessage;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
-use rtnetlink::{Handle, IpVersion, RouteMessageBuilder, new_connection};
+use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
 // use std::error::Error;
 
 use crate::bgp::{AddressFamily, Afi};

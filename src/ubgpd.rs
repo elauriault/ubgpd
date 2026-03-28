@@ -29,7 +29,7 @@ struct Opt {
 async fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::parse();
-    let mut config = config::read_config(&opt.config).context(format!(
+    let config = config::read_config(&opt.config).context(format!(
         "Failed to read config file {}",
         opt.config.display()
     ))?;
