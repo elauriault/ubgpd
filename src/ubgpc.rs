@@ -1,9 +1,6 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use ubgp::config_client::ConfigClient;
-use ubgp::state_client::StateClient;
-use ubgp::NeighborRequest;
-use ubgp::RibRequest;
+use ubgp::{config_client::ConfigClient, state_client::StateClient, NeighborRequest, RibRequest};
 
 pub mod ubgp {
     tonic::include_proto!("ubgp");
@@ -28,19 +25,17 @@ enum Commands {
     Neighbors(NeighborsArgs),
 }
 
-#[derive(clap::Args)]
-#[command(author, version, about, long_about = None)]
+#[derive(Args)]
 struct RibArgs {
-    #[arg(short, long, value_parser, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 1)]
     afi: u32,
-    #[arg(short, long, value_parser, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 1)]
     safi: u32,
 }
 
 #[derive(Args)]
-#[command(author, version, about, long_about = None)]
 struct NeighborsArgs {
-    #[arg(short, long, value_parser)]
+    #[arg(short, long)]
     address: Option<String>,
 }
 
@@ -48,26 +43,30 @@ struct NeighborsArgs {
 async fn main() -> Result<()> {
     let opt = Opt::parse();
 
-    match opt.command {
+    let command = match opt.command {
+        Some(cmd) => cmd,
         None => {
             println!("Please provide a command. Use --help for usage information.");
             std::process::exit(1);
         }
-        Some(Commands::Rib(rib_args)) => {
-            let mut client =
-                StateClient::connect(format!("http://{}:{}", opt.server, opt.port)).await?;
+    };
+
+    let server_url = format!("http://{}:{}", opt.server, opt.port);
+
+    match command {
+        Commands::Rib(args) => {
+            let mut client = StateClient::connect(server_url).await?;
             let request = tonic::Request::new(RibRequest {
-                afi: rib_args.afi,
-                safi: rib_args.safi,
+                afi: args.afi,
+                safi: args.safi,
             });
             let response = client.get_rib(request).await?;
             println!("{:?}", response.get_ref());
         }
-        Some(Commands::Neighbors(neighbors_args)) => {
-            let mut client =
-                ConfigClient::connect(format!("http://{}:{}", opt.server, opt.port)).await?;
+        Commands::Neighbors(args) => {
+            let mut client = ConfigClient::connect(server_url).await?;
             let request = tonic::Request::new(NeighborRequest {
-                ip: neighbors_args.address,
+                ip: args.address,
             });
             let response = client.get_neighbor_config(request).await?;
             println!("{:?}", response.get_ref());

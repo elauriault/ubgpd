@@ -153,7 +153,7 @@ pub async fn process_message_active(
                             n.tx.clone().context("Neighbor TX channel not initialized")?
                         };
                         tokio::spawn(async {
-                            timers::timer_keepalive(nb, ta).await;
+                            let _ = timers::timer_keepalive(nb, ta).await;
                         });
                         log::debug!("FSM ACTIVE: Active to OpenConfirm");
                         tx.send(Event::BGPOpen)

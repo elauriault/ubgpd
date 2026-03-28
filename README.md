@@ -1,15 +1,56 @@
- ubgpd
+# ubgpd
 
-## Installation
+BGP daemon in Rust. Handles basic peering, UPDATE processing, IPv4/IPv6 unicast, netlink FIB sync and gRPC/CLI.
 
-### Cargo
+Not production-ready -- missing parts of the FSM and full FIB deletion handling.
 
-* Install the rust toolchain in order to have cargo installed by following
-  [this](https://www.rust-lang.org/tools/install) guide.
+## Build
 
-## Integration tests
+Needs Rust 1.94+ and `protoc`:
 
+```sh
+apt install protobuf-compiler
+cargo build --release
 ```
+
+Produces `ubgpd` (daemon) and `ubgpc` (CLI).
+
+## Config
+
+Default path: `./ubgpd.conf`. See the sample config in the repo for all options.
+
+```toml
+asn = 42
+rid = "2.2.2.2"
+port = 179
+
+[[families]]
+afi = "Ipv4"
+safi = "NLRIUnicast"
+
+[[neighbors]]
+asn = 123
+ip = "192.168.122.225"
+port = 179
+```
+
+## Usage
+
+```sh
+RUST_LOG=info ubgpd --config ubgpd.conf
+ubgpc neighbors
+ubgpc rib --afi 1 --safi 1
+```
+
+## Tests
+
+```sh
+cargo test --all
+```
+
+Integration tests:
+
+```sh
 cargo build
 docker-compose -f tests/integration/docker-compose-dev.yml up -d
 tests/integration/integration_test.sh
@@ -34,4 +75,3 @@ for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
-
