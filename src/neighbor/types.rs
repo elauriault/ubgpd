@@ -47,8 +47,8 @@ pub enum Event {
     RibUpdate(Vec<(bgp::Nlri, Option<rib::RouteAttributes>)>),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
-pub enum PeeringType {
-    Ibgp,
-    Ebgp,
-}
+// #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
+// pub enum PeeringType {
+//     Ibgp,
+//     Ebgp,
+// }

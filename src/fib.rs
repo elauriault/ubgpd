@@ -2,7 +2,7 @@ use anyhow::Context;
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 // use netlink_packet::route::RouteProtool;
@@ -11,7 +11,7 @@ use netlink_packet_route::link::LinkAttribute;
 // use netlink_packet_route::route::nlas::Nla as rnla;
 // use netlink_packet_route::route::message::RouteMessage;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
-use rtnetlink::{new_connection, Handle, IpVersion};
+use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
 // use std::error::Error;
 
 use crate::bgp::{AddressFamily, Afi};
@@ -184,10 +184,11 @@ impl Fib {
             IpNet::V6(t) => match nexthop {
                 IpAddr::V6(n) => {
                     let _ = route
-                        .add()
-                        .v6()
-                        .destination_prefix(t.addr(), t.prefix_len())
-                        .gateway(n)
+                        .add(RouteMessageBuilder::<Ipv6Addr>::new().destination_prefix(t.addr(), t.prefix_len()).gateway(n).build())
+                        // .add()
+                        // .v6()
+                        // .destination_prefix(t.addr(), t.prefix_len())
+                        // .gateway(n)
                         // .protocol(3)
                         .execute()
                         .await;
@@ -197,12 +198,22 @@ impl Fib {
             },
             IpNet::V4(t) => match nexthop {
                 IpAddr::V6(_n) => {}
+                // IpAddr::V4(n) => {
+                //     let _ = route
+                //         .add()
+                //         .v4()
+                //         .destination_prefix(t.addr(), t.prefix_len())
+                //         .gateway(n)
+                //         // .protocol(3)
+                //         .execute()
+                //         .await;
+                //     // .unwrap();
+                // }
                 IpAddr::V4(n) => {
                     let _ = route
-                        .add()
-                        .v4()
-                        .destination_prefix(t.addr(), t.prefix_len())
-                        .gateway(n)
+                        .add(RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(t.addr(), t.prefix_len()).gateway(n).build())
+                        // .destination_prefix(t.addr(), t.prefix_len())
+                        // .gateway(n)
                         // .protocol(3)
                         .execute()
                         .await;
@@ -226,8 +237,8 @@ impl Fib {
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
         let mut routes = match af.afi {
-            Afi::Ipv4 => handle.route().get(IpVersion::V4).execute(),
-            Afi::Ipv6 => handle.route().get(IpVersion::V6).execute(),
+            Afi::Ipv4 => handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute(),
+            Afi::Ipv6 => handle.route().get(RouteMessageBuilder::<Ipv6Addr>::new().build()).execute(),
         };
         // let mut v: Vec<RouteMessage> = vec![];
         let mut v = vec![];

@@ -135,8 +135,8 @@ pub async fn connect_mgr(speaker: Arc<Mutex<BGPSpeaker>>) {
     }
 }
 
-/// Connect to a BGP neighbor.
-pub async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<neighbor::BGPNeighbor>>) {
-    // Delegating to the neighbor module's connect function
-    neighbor::connect(speaker, neighbor).await;
-}
+// Connect to a BGP neighbor.
+// pub async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<neighbor::BGPNeighbor>>) {
+//     // Delegating to the neighbor module's connect function
+//     neighbor::connect(speaker, neighbor).await;
+// }
