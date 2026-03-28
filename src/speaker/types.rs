@@ -13,7 +13,10 @@ use crate::fib;
 use crate::neighbor;
 use crate::rib;
 
+use super::connection;
 use super::events::{FibEvent, RibEvent};
+use super::manager;
+use tokio::sync::mpsc;
 
 /// The main BGP speaker struct that coordinates BGP operations.
 #[derive(Builder, Debug)]
@@ -67,11 +70,20 @@ impl BGPSpeaker {
             None,
             self.local_asn,
             self.router_id,
-            Some(config.ip.parse().expect("Invalid neighbor IP address in configuration")),
+            Some(
+                config
+                    .ip
+                    .parse()
+                    .expect("Invalid neighbor IP address in configuration"),
+            ),
             Some(config.port),
             Some(config.asn),
-            config.hold_time.expect("Hold time not configured for neighbor"),
-            config.connect_retry.expect("Connect retry time not configured for neighbor"),
+            config
+                .hold_time
+                .expect("Hold time not configured for neighbor"),
+            config
+                .connect_retry
+                .expect("Connect retry time not configured for neighbor"),
             neighbor::BGPState::Idle,
             config.families,
             ribtx,
@@ -83,10 +95,6 @@ impl BGPSpeaker {
 
     /// Start the BGP speaker with all its associated processes.
     pub async fn start(speaker: Arc<Mutex<BGPSpeaker>>) {
-        use super::connection;
-        use super::manager;
-        use tokio::sync::mpsc;
-
         // Initialize RIB and FIB for each address family
         {
             let mut speaker = speaker.lock().await;

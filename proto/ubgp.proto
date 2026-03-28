@@ -40,7 +40,7 @@ message RibEntry {
   // RouteAttributes attributes = 2;
 }
 
-message RouteAttributes {
+// message RouteAttributes {
     // as_path: bgp::ASPATH,
     // origin: bgp::OriginType,
     // pub next_hop: IpAddr,
@@ -51,4 +51,4 @@ message RouteAttributes {
     // recv_time: Instant,
     // pub peer_rid: u32,
     // peer_ip: IpAddr,
-}
+// }

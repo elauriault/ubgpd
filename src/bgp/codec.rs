@@ -1,19 +1,20 @@
 use bytes::{Buf, BytesMut};
 use num_traits::FromPrimitive;
-use tokio::net::TcpStream;
-use tokio_util::codec::{Decoder, Encoder, Framed};
+// use tokio::net::TcpStream;
+// use tokio_util::codec::{Decoder, Encoder, Framed};
+use tokio_util::codec::{Decoder, Encoder};
 
 use super::types::*;
 
 pub struct BGPMessageCodec;
-type BGPConnection = Framed<TcpStream, BGPMessageCodec>;
-
-impl BGPMessageCodec {
-    pub async fn _frame_it(socket: TcpStream) -> Result<BGPConnection, std::io::Error> {
-        let server = Framed::new(socket, BGPMessageCodec);
-        Ok(server)
-    }
-}
+// type BGPConnection = Framed<TcpStream, BGPMessageCodec>;
+//
+// impl BGPMessageCodec {
+//     pub async fn _frame_it(socket: TcpStream) -> Result<BGPConnection, std::io::Error> {
+//         let server = Framed::new(socket, BGPMessageCodec);
+//         Ok(server)
+//     }
+// }
 
 impl Decoder for BGPMessageCodec {
     type Item = Vec<u8>;
