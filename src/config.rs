@@ -43,8 +43,34 @@ pub fn read_config(path: &PathBuf) -> Result<Config> {
     f.read_to_string(&mut c)
         .with_context(|| format!("Failed to read config file {}", path.display()))?;
 
-    let config: Config = toml::from_str(&c)
+    let mut config: Config = toml::from_str(&c)
         .with_context(|| format!("Failed to parse config file {}", path.display()))?;
+
+    // Add defaults with proper error handling
+    config.hold_time = config.hold_time.or(Some(BGP_DEFAULT_HOLD_TIME));
+    config.port = config.port.or(Some(BGP_DEFAULT_PORT));
+
+    config.localips = config
+        .localips
+        .or_else(|| match BGP_DEFAULT_LOCAL_IP.parse() {
+            Ok(ip) => Some(vec![ip]),
+            Err(e) => {
+                log::error!(
+                    "Failed to parse default IP '{}': {}",
+                    BGP_DEFAULT_LOCAL_IP,
+                    e
+                );
+                None
+            }
+        });
+
+    config.families = config.families.or_else(|| {
+        let a = bgp::AddressFamily {
+            afi: bgp::Afi::Ipv4,
+            safi: bgp::Safi::NLRIUnicast,
+        };
+        Some(vec![a])
+    });
 
     Ok(config)
 }
