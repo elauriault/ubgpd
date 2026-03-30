@@ -13,7 +13,7 @@ A lightweight BGP daemon written in Rust. ubgpd implements the BGP-4 protocol wi
 
 ## State
 
-ubgpd is a personal side project with the explicit purpose of serving a learning environment for the Rust programming language. It is not feature complete as of today and may never be.
+ubgpd is a personal side project with the explicit purpose of serving as a learning environment for the Rust programming language. It is not feature complete as of today and may never be.
 
 ## Building
 
@@ -90,13 +90,13 @@ tests/integration/integration_test.sh
 docker-compose -f tests/integration/docker-compose-dev.yml down --volumes --remove-orphans
 ```
 
-## To dos
+## TODO
 
-- Many FSM state transition are missing
-- IGP metric comparison for iBGP paths not implemented
+- Many FSM state transitions are missing
+- IGP metric comparison for iBGP paths is not implemented
 - Route deletion in FIB is not implemented
 - gRPC RIB response only returns prefixes, not attributes
-- Finish IPv6 MP_REACH_NLRI handling to enable transit fucntionality
+- IPv6 MP_REACH_NLRI handling is incomplete, preventing transit functionality
 
 ## License
 
