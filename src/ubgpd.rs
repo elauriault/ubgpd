@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     let hold_time = config.hold_time.context("Hold time not configured")?;
     let local_ips = config.localips.context("Local IPs not configured")?;
     let port = config.port.context("Port not configured")?;
-    
+
     let speaker = Arc::new(Mutex::new(speaker::BGPSpeaker::new(
         config.asn,
         u32::from(config.rid),

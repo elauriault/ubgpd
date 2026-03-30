@@ -1,7 +1,3 @@
-// File: src/speaker/types.rs
-//
-// This file contains the main BGPSpeaker struct and its associated types.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;

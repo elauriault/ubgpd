@@ -277,4 +277,3 @@ impl From<BGPOptionalParameters> for BGPCapabilities {
         BGPCapabilities { params: all_caps }
     }
 }
-

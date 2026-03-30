@@ -1,5 +1,3 @@
-// src/neighbor/mod.rs
-
 mod capabilities;
 mod connection;
 mod fsm;

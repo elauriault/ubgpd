@@ -48,7 +48,10 @@ impl Config for GrpcServer {
                 for n in neighbors {
                     let n = n.lock().await;
                     let entry = NeighborEntry {
-                        ip: n.remote_ip.map(|ip| ip.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        ip: n
+                            .remote_ip
+                            .map(|ip| ip.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
                         port: n.remote_port.unwrap_or(179) as u32,
                         asn: n.remote_asn.unwrap_or(0) as u32,
                         routerid: n.remote_rid.unwrap_or(0),
@@ -58,7 +61,9 @@ impl Config for GrpcServer {
                 }
             }
             Some(ip) => {
-                let ip: IpAddr = ip.parse().map_err(|e| Status::invalid_argument(format!("Invalid IP: {}", e)))?;
+                let ip: IpAddr = ip
+                    .parse()
+                    .map_err(|e| Status::invalid_argument(format!("Invalid IP: {}", e)))?;
                 for n in neighbors {
                     let n = n.lock().await;
                     if Some(ip) == n.remote_ip {
@@ -122,7 +127,9 @@ impl State for GrpcServer {
 }
 
 pub async fn grpc_server(speaker: Arc<Mutex<speaker::BGPSpeaker>>) {
-    let addr = "127.0.0.1:50051".parse().expect("Invalid gRPC server address");
+    let addr = "127.0.0.1:50051"
+        .parse()
+        .expect("Invalid gRPC server address");
     let config_server = GrpcServer::new(speaker.clone());
     let state_server = GrpcServer::new(speaker);
 

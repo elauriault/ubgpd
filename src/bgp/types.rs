@@ -1,5 +1,4 @@
 use num_derive::FromPrimitive;
-// use num_traits::FromPrimitive;
 use serde_derive::Deserialize;
 use thiserror::Error;
 
@@ -57,6 +56,7 @@ pub enum HeaderSubCode {
     BadMessageType = 3,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum OpenSubCode {
@@ -64,22 +64,23 @@ pub enum OpenSubCode {
     BadPeerAS = 2,
     BadBGPIdentifier = 3,
     UnsupportedOptionalParameter = 4,
-    // Deprecated = 5,
+    Deprecated = 5,
     UnacceptableHoldTime = 6,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum UpdateSubCode {
-    // MalformedAttributeList = 1,
-    // UnrecognizedWellKnownAttribute = 2,
+    MalformedAttributeList = 1,
+    UnrecognizedWellKnownAttribute = 2,
     MissingWellKnownAttribute = 3,
-    // AttributeFlagsError = 4,
+    AttributeFlagsError = 4,
     AttributeLengthError = 5,
-    // InvalidORIGINAttribute = 6,
-    // Deprecated = 7,
+    InvalidORIGINAttribute = 6,
+    Deprecated = 7,
     InvalidNEXTHOPAttribute = 8,
-    // OptionalAttributeError = 9,
+    OptionalAttributeError = 9,
     InvalidNetworkField = 10,
     MalformedASPATH = 11,
 }
@@ -199,26 +200,42 @@ impl BgpValidationError {
     }
 }
 
-//
 pub fn validate_message_length(length: usize) -> Result<(), BgpValidationError> {
-   if length < MIN_MESSAGE_LENGTH {
-       return Err(BgpValidationError::MessageTooShort {
-           actual: length,
-           minimum: MIN_MESSAGE_LENGTH,
-       });
-   }
-   if length > MAX_MESSAGE_LENGTH {
-       return Err(BgpValidationError::MessageTooLong {
-           actual: length,
-           maximum: MAX_MESSAGE_LENGTH,
-       });
-   }
-   Ok(())
+    if length < MIN_MESSAGE_LENGTH {
+        return Err(BgpValidationError::MessageTooShort {
+            actual: length,
+            minimum: MIN_MESSAGE_LENGTH,
+        });
+    }
+    if length > MAX_MESSAGE_LENGTH {
+        return Err(BgpValidationError::MessageTooLong {
+            actual: length,
+            maximum: MAX_MESSAGE_LENGTH,
+        });
+    }
+    Ok(())
 }
 
 pub fn validate_marker(marker: &[u8; 16]) -> Result<(), BgpValidationError> {
-   if *marker != MARKER {
-       return Err(BgpValidationError::InvalidMarker);
-   }
-   Ok(())
+    if *marker != MARKER {
+        return Err(BgpValidationError::InvalidMarker);
+    }
+    Ok(())
+}
+
+pub fn is_extended_len(mask: u8) -> bool {
+    let mask = mask >> 4;
+    !matches!(mask & 0b0001, 0)
+}
+pub fn prefix_bytes(plen: u8, afi: &Afi) -> Result<usize, BgpValidationError> {
+    let max_len = match afi {
+        Afi::Ipv4 => 32,
+        Afi::Ipv6 => 128,
+    };
+
+    if plen > max_len {
+        return Err(BgpValidationError::InvalidNlriPrefixLength(plen));
+    }
+
+    Ok((plen as usize).div_ceil(8))
 }

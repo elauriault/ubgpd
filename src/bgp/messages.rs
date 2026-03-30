@@ -218,8 +218,10 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
                 break;
             }
             let plen = src[i];
-            let plen_bytes = prefix_bytes(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
-            let end = i.checked_add(plen_bytes + 1)
+            let plen_bytes =
+                prefix_bytes(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
+            let end = i
+                .checked_add(plen_bytes + 1)
                 .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             if end > src.len() {
                 return Err(BgpError::Message("NLRI extends beyond buffer".to_string()));
@@ -297,8 +299,10 @@ impl TryFrom<Vec<u8>> for BGPUpdateMessage {
         let mut routes: Vec<Nlri> = vec![];
         while i < total_len {
             let plen = src[i];
-            let plen_bytes = prefix_bytes(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
-            let end = i.checked_add(plen_bytes + 1)
+            let plen_bytes =
+                prefix_bytes(plen, &Afi::Ipv4).map_err(|e| BgpError::Message(e.to_string()))?;
+            let end = i
+                .checked_add(plen_bytes + 1)
                 .ok_or_else(|| BgpError::Message("Buffer offset overflow".to_string()))?;
             let buf = Ipv4Octets {
                 octets: src[i..end].to_vec(),
@@ -430,7 +434,7 @@ impl TryFrom<Vec<u8>> for Message {
         length_bytes.copy_from_slice(&src[16..18]);
         let declared_length = u16::from_be_bytes(length_bytes) as usize;
 
-        if declared_length < 19 || declared_length > 4096 {
+        if !(19..=4096).contains(&declared_length) {
             return Err(BgpError::Message("Invalid message length".to_string()));
         }
 
@@ -443,7 +447,7 @@ impl TryFrom<Vec<u8>> for Message {
         let mtype = MessageType::from_u8(mtype[0])
             .ok_or_else(|| BgpError::Message("Invalid message type".to_string()))?;
         let header = BGPMessageHeaderBuilder::default()
-            .message_type(mtype.clone())
+            .message_type(mtype)
             .build()
             .map_err(|e| BgpError::Message(format!("Failed to build header: {}", e)))?;
         let mut length_bytes = [0u8; 2];
@@ -480,7 +484,7 @@ impl TryFrom<Vec<u8>> for Message {
 impl From<Message> for Vec<u8> {
     fn from(val: Message) -> Self {
         let mut buf = Cursor::new(vec![]);
-        buf.write_u8(val.header.message_type.clone() as u8).unwrap();
+        buf.write_u8(val.header.message_type as u8).unwrap();
         let v: Vec<u8> = val.body.into();
         buf.write_all(&v[0..]).unwrap();
         buf.into_inner()
@@ -490,15 +494,14 @@ impl From<Message> for Vec<u8> {
 impl Message {
     pub fn new(mtype: MessageType, body: BGPMessageBody) -> anyhow::Result<Message> {
         let header = BGPMessageHeaderBuilder::default()
-            .message_type(mtype.clone())
+            .message_type(mtype)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        Ok(MessageBuilder::default()
+        MessageBuilder::default()
             .header(header)
             .body(body)
             .build()
-            .map_err(|e| anyhow::anyhow!("{}", e))?)
+            .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
-

@@ -65,9 +65,7 @@ async fn main() -> Result<()> {
         }
         Commands::Neighbors(args) => {
             let mut client = ConfigClient::connect(server_url).await?;
-            let request = tonic::Request::new(NeighborRequest {
-                ip: args.address,
-            });
+            let request = tonic::Request::new(NeighborRequest { ip: args.address });
             let response = client.get_neighbor_config(request).await?;
             println!("{:?}", response.get_ref());
         }
