@@ -4,9 +4,9 @@ A lightweight BGP daemon written in Rust. ubgpd implements the BGP-4 protocol wi
 
 ## Implemented Features
 
-- BGP-4 protocol with full finite state machine ([RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271))
+- BGP-4 protocol ([RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271))
 - Multiprotocol Extensions for IPv4 and IPv6 unicast ([RFC 4760](https://datatracker.ietf.org/doc/html/rfc4760))
-- Capabilities advertisement with optional parameter negotiation ([RFC 5492](https://datatracker.ietf.org/doc/html/rfc5492))
+- Capabilities advertisement with parameter negotiation ([RFC 5492](https://datatracker.ietf.org/doc/html/rfc5492))
 - RIB with best path selection
 - FIB integration with the Linux kernel routing table via netlink
 - gRPC API for querying neighbors and RIB state
