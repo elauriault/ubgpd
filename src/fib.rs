@@ -2,17 +2,12 @@ use anyhow::Context;
 use futures::stream::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use netlink_packet_route::link::LinkAttribute;
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
+use rtnetlink::{new_connection, Handle, RouteMessageBuilder};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-// use netlink_packet::route::RouteProtool;
-// use netlink_packet_route::link::nlas::Nla as lnla;
-use netlink_packet_route::link::LinkAttribute;
-// use netlink_packet_route::route::nlas::Nla as rnla;
-// use netlink_packet_route::route::message::RouteMessage;
-use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol};
-use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
-// use std::error::Error;
 
 use crate::bgp::{AddressFamily, Afi};
 use crate::rib::{self};
@@ -73,10 +68,14 @@ impl FibEntry {
             Some(dev_id) => match get_link_name(handle, dev_id).await {
                 Ok(name) => Some(name),
                 Err(e) => {
-                    log::error!("Failed to get link name for device {}: {} (route will be skipped)", dev_id, e);
+                    log::error!(
+                        "Failed to get link name for device {}: {} (route will be skipped)",
+                        dev_id,
+                        e
+                    );
                     return None;
                 }
-            }
+            },
             None => {
                 log::debug!("Route has no output interface specified");
                 None
@@ -184,40 +183,31 @@ impl Fib {
             IpNet::V6(t) => match nexthop {
                 IpAddr::V6(n) => {
                     let _ = route
-                        .add(RouteMessageBuilder::<Ipv6Addr>::new().destination_prefix(t.addr(), t.prefix_len()).gateway(n).build())
-                        // .add()
-                        // .v6()
-                        // .destination_prefix(t.addr(), t.prefix_len())
-                        // .gateway(n)
-                        // .protocol(3)
+                        .add(
+                            RouteMessageBuilder::<Ipv6Addr>::new()
+                                .destination_prefix(t.addr(), t.prefix_len())
+                                .gateway(n)
+                                .protocol(RouteProtocol::Bgp)
+                                .build(),
+                        )
                         .execute()
                         .await;
-                    // .unwrap();
                 }
                 IpAddr::V4(_n) => {}
             },
             IpNet::V4(t) => match nexthop {
                 IpAddr::V6(_n) => {}
-                // IpAddr::V4(n) => {
-                //     let _ = route
-                //         .add()
-                //         .v4()
-                //         .destination_prefix(t.addr(), t.prefix_len())
-                //         .gateway(n)
-                //         // .protocol(3)
-                //         .execute()
-                //         .await;
-                //     // .unwrap();
-                // }
                 IpAddr::V4(n) => {
                     let _ = route
-                        .add(RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(t.addr(), t.prefix_len()).gateway(n).build())
-                        // .destination_prefix(t.addr(), t.prefix_len())
-                        // .gateway(n)
-                        // .protocol(3)
+                        .add(
+                            RouteMessageBuilder::<Ipv4Addr>::new()
+                                .destination_prefix(t.addr(), t.prefix_len())
+                                .gateway(n)
+                                .protocol(RouteProtocol::Bgp)
+                                .build(),
+                        )
                         .execute()
                         .await;
-                    // .unwrap();
                 }
             },
         };
@@ -238,8 +228,14 @@ impl Fib {
         let (connection, handle, _) = new_connection().unwrap();
         tokio::spawn(connection);
         let mut routes = match af.afi {
-            Afi::Ipv4 => handle.route().get(RouteMessageBuilder::<Ipv4Addr>::new().build()).execute(),
-            Afi::Ipv6 => handle.route().get(RouteMessageBuilder::<Ipv6Addr>::new().build()).execute(),
+            Afi::Ipv4 => handle
+                .route()
+                .get(RouteMessageBuilder::<Ipv4Addr>::new().build())
+                .execute(),
+            Afi::Ipv6 => handle
+                .route()
+                .get(RouteMessageBuilder::<Ipv6Addr>::new().build())
+                .execute(),
         };
         // let mut v: Vec<RouteMessage> = vec![];
         let mut v = vec![];
@@ -260,11 +256,13 @@ impl Fib {
 
 async fn get_link_name(handle: Handle, index: u32) -> Result<String, anyhow::Error> {
     let mut links = handle.link().get().match_index(index).execute();
-    let msg = links.try_next().await
+    let msg = links
+        .try_next()
+        .await
         .context("Failed to get link information")?
         .context("No link found with specified index")?;
 
-    Ok(msg.attributes
+    msg.attributes
         .iter()
         .find_map(|nla| {
             if let LinkAttribute::IfName(v) = nla {
@@ -273,19 +271,5 @@ async fn get_link_name(handle: Handle, index: u32) -> Result<String, anyhow::Err
                 None
             }
         })
-        .context("Link has no interface name")?)
+        .context("Link has no interface name")
 }
-
-// #[cfg(test)]
-// mod tests {
-//
-//     use super::*;
-//
-//     #[test]
-//     fn test_refresh() {
-//         // let f = tokio_test::block_on(Fib::new());
-//         // let g = Fib::default();
-//         // tokio_test::block_on(g.refresh());
-//         // assert_eq!(f, g);
-//     }
-// }

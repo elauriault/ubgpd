@@ -1,5 +1,3 @@
-// src/neighbor/types.rs
-
 use crate::bgp::{self};
 use crate::rib;
 
@@ -47,8 +45,9 @@ pub enum Event {
     RibUpdate(Vec<(bgp::Nlri, Option<rib::RouteAttributes>)>),
 }
 
-// #[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
-// pub enum PeeringType {
-//     Ibgp,
-//     Ebgp,
-// }
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Ord, Hash)]
+pub enum PeeringType {
+    Ibgp,
+    Ebgp,
+}

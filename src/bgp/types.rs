@@ -1,5 +1,4 @@
 use num_derive::FromPrimitive;
-// use num_traits::FromPrimitive;
 use serde_derive::Deserialize;
 use thiserror::Error;
 
@@ -59,6 +58,7 @@ pub enum HeaderSubCode {
     BadMessageType = 3,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum OpenSubCode {
@@ -66,22 +66,23 @@ pub enum OpenSubCode {
     BadPeerAS = 2,
     BadBGPIdentifier = 3,
     UnsupportedOptionalParameter = 4,
-    // Deprecated = 5,
+    Deprecated = 5,
     UnacceptableHoldTime = 6,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum UpdateSubCode {
-    // MalformedAttributeList = 1,
-    // UnrecognizedWellKnownAttribute = 2,
+    MalformedAttributeList = 1,
+    UnrecognizedWellKnownAttribute = 2,
     MissingWellKnownAttribute = 3,
-    // AttributeFlagsError = 4,
+    AttributeFlagsError = 4,
     AttributeLengthError = 5,
-    // InvalidORIGINAttribute = 6,
-    // Deprecated = 7,
+    InvalidORIGINAttribute = 6,
+    Deprecated = 7,
     InvalidNEXTHOPAttribute = 8,
-    // OptionalAttributeError = 9,
+    OptionalAttributeError = 9,
     InvalidNetworkField = 10,
     MalformedASPATH = 11,
 }
@@ -202,118 +203,119 @@ impl BgpValidationError {
     }
 }
 
-// Validation helper functions
-//pub fn validate_buffer_bounds(
-//    buffer: &[u8],
-//    offset: usize,
-//    length: usize,
-//) -> Result<(), BgpValidationError> {
-//    if offset + length > buffer.len() {
-//        return Err(BgpValidationError::InvalidBufferBounds {
-//            offset,
-//            length,
-//            buffer_size: buffer.len(),
-//        });
-//    }
-//    Ok(())
-//}
-//
 pub fn validate_message_length(length: usize) -> Result<(), BgpValidationError> {
-   if length < MIN_MESSAGE_LENGTH {
-       return Err(BgpValidationError::MessageTooShort {
-           actual: length,
-           minimum: MIN_MESSAGE_LENGTH,
-       });
-   }
-   if length > MAX_MESSAGE_LENGTH {
-       return Err(BgpValidationError::MessageTooLong {
-           actual: length,
-           maximum: MAX_MESSAGE_LENGTH,
-       });
-   }
-   Ok(())
+    if length < MIN_MESSAGE_LENGTH {
+        return Err(BgpValidationError::MessageTooShort {
+            actual: length,
+            minimum: MIN_MESSAGE_LENGTH,
+        });
+    }
+    if length > MAX_MESSAGE_LENGTH {
+        return Err(BgpValidationError::MessageTooLong {
+            actual: length,
+            maximum: MAX_MESSAGE_LENGTH,
+        });
+    }
+    Ok(())
 }
 
 pub fn validate_marker(marker: &[u8; 16]) -> Result<(), BgpValidationError> {
-   if *marker != MARKER {
-       return Err(BgpValidationError::InvalidMarker);
-   }
-   Ok(())
+    if *marker != MARKER {
+        return Err(BgpValidationError::InvalidMarker);
+    }
+    Ok(())
 }
-//
-//pub fn validate_bgp_version(version: u8) -> Result<(), BgpValidationError> {
-//    if version != VERSION {
-//        return Err(BgpValidationError::InvalidVersion {
-//            actual: version,
-//            expected: VERSION,
-//        });
-//    }
-//    Ok(())
-//}
-//
-//pub fn validate_asn(asn: u16) -> Result<(), BgpValidationError> {
-//    if asn == 0 {
-//        return Err(BgpValidationError::InvalidAsn(asn));
-//    }
-//    Ok(())
-//}
-//
-//pub fn validate_hold_time(hold_time: u16) -> Result<(), BgpValidationError> {
-//    // Hold time must be 0 or >= 3 seconds per RFC 4271
-//    if hold_time != 0 && hold_time < 3 {
-//        return Err(BgpValidationError::InvalidHoldTime(hold_time));
-//    }
-//    Ok(())
-//}
-//
-//pub fn validate_router_id(router_id: u32) -> Result<(), BgpValidationError> {
-//    if router_id == 0 {
-//        return Err(BgpValidationError::InvalidRouterId(router_id));
-//    }
-//    Ok(())
-//}
-//
-//
+
 // Utility function for checking extended length bit in path attribute flags
 pub fn is_extended_len(mask: u8) -> bool {
-   let mask = mask >> 4;
-   !matches!(mask & 0b0001, 0)
+    let mask = mask >> 4;
+    !matches!(mask & 0b0001, 0)
 }
-//
-//// Safe slice extraction with validation
-//pub fn safe_slice(buffer: &[u8], start: usize, end: usize) -> Result<&[u8], BgpValidationError> {
-//    if start > end || end > buffer.len() {
-//        return Err(BgpValidationError::InvalidBufferBounds {
-//            offset: start,
-//            length: buffer.len().saturating_sub(start), // or just 0
-//            buffer_size: buffer.len(),
-//        });
-//    }
-//    Ok(&buffer[start..end])
-//}
-//
-//// Safe array extraction with validation
-//pub fn safe_array<const N: usize>(
-//    buffer: &[u8],
-//    offset: usize,
-//) -> Result<[u8; N], BgpValidationError> {
-//    validate_buffer_bounds(buffer, offset, N)?;
-//    let mut array = [0u8; N];
-//    array.copy_from_slice(&buffer[offset..offset + N]);
-//    Ok(array)
-//}
-
 /// Calculate bytes needed for prefix length with validation
 pub fn prefix_bytes(plen: u8, afi: &Afi) -> Result<usize, BgpValidationError> {
     let max_len = match afi {
         Afi::Ipv4 => 32,
         Afi::Ipv6 => 128,
     };
-    
+
     if plen > max_len {
         return Err(BgpValidationError::InvalidNlriPrefixLength(plen));
     }
-    
+
     Ok((plen as usize).div_ceil(8))
 }
 
+#[cfg(test)]
+pub fn validate_buffer_bounds(
+    buffer: &[u8],
+    offset: usize,
+    length: usize,
+) -> Result<(), BgpValidationError> {
+    if offset + length > buffer.len() {
+        return Err(BgpValidationError::InvalidBufferBounds {
+            offset,
+            length,
+            buffer_size: buffer.len(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn validate_bgp_version(version: u8) -> Result<(), BgpValidationError> {
+    if version != VERSION {
+        return Err(BgpValidationError::InvalidVersion {
+            actual: version,
+            expected: VERSION,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn validate_asn(asn: u16) -> Result<(), BgpValidationError> {
+    if asn == 0 {
+        return Err(BgpValidationError::InvalidAsn(asn));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn validate_hold_time(hold_time: u16) -> Result<(), BgpValidationError> {
+    // Hold time must be 0 or >= 3 seconds per RFC 4271
+    if hold_time != 0 && hold_time < 3 {
+        return Err(BgpValidationError::InvalidHoldTime(hold_time));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn validate_router_id(router_id: u32) -> Result<(), BgpValidationError> {
+    if router_id == 0 {
+        return Err(BgpValidationError::InvalidRouterId(router_id));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn safe_slice(buffer: &[u8], start: usize, end: usize) -> Result<&[u8], BgpValidationError> {
+    if start > end || end > buffer.len() {
+        return Err(BgpValidationError::InvalidBufferBounds {
+            offset: start,
+            length: buffer.len().saturating_sub(start),
+            buffer_size: buffer.len(),
+        });
+    }
+    Ok(&buffer[start..end])
+}
+
+#[cfg(test)]
+pub fn safe_array<const N: usize>(
+    buffer: &[u8],
+    offset: usize,
+) -> Result<[u8; N], BgpValidationError> {
+    validate_buffer_bounds(buffer, offset, N)?;
+    let mut array = [0u8; N];
+    array.copy_from_slice(&buffer[offset..offset + N]);
+    Ok(array)
+}

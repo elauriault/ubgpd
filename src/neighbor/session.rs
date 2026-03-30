@@ -1,5 +1,3 @@
-// src/neighbor/session.rs
-
 use super::capabilities::Capabilities;
 use super::types::BGPState;
 use crate::bgp::{self, AddressFamily};
@@ -20,19 +18,19 @@ pub struct BGPSessionAttributes {
     pub connect_retry_time: u16,
     pub connect_retry_timer: usize,
     pub connect_retry_counter: usize,
-    // pub accept_connections_unconfigured_peers: bool,
+    pub accept_connections_unconfigured_peers: bool,
     pub allow_automatic_start: bool,
-    // pub allow_automatic_stop: bool,
-    // pub collision_detect_established_state: bool,
-    // pub damp_peer_oscillations: bool,
-    // pub delay_open: bool,
-    // pub delay_open_time: usize,
-    // pub delay_open_timer: usize,
-    // pub idle_hold_time: usize,
-    // pub idle_hold_timer: usize,
+    pub allow_automatic_stop: bool,
+    pub collision_detect_established_state: bool,
+    pub damp_peer_oscillations: bool,
+    pub delay_open: bool,
+    pub delay_open_time: usize,
+    pub delay_open_timer: usize,
+    pub idle_hold_time: usize,
+    pub idle_hold_timer: usize,
     pub passive_tcp_establishment: bool,
-    // pub send_notification_without_open: bool,
-    // pub track_tcp_state: bool,
+    pub send_notification_without_open: bool,
+    pub track_tcp_state: bool,
 }
 
 #[derive(Debug, Clone)]
