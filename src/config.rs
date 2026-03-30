@@ -10,6 +10,7 @@ use serde_derive::Deserialize;
 pub const BGP_DEFAULT_PORT: u16 = 179;
 pub const BGP_DEFAULT_HOLD_TIME: u16 = 3;
 pub const BGP_DEFAULT_LOCAL_IP: &str = "[::]:0";
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub asn: u16,
@@ -99,11 +100,3 @@ pub struct Neighbor {
     #[serde(default = "default_exponential_backoff")]
     pub exponential_backoff: bool,
 }
-
-// impl Default for Neighbor {
-//     fn default() -> Self {
-//         Neighbor {
-//             connect_retry: Some(120),
-//         }
-//     }
-// }

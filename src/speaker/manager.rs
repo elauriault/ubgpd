@@ -1,7 +1,3 @@
-// File: src/speaker/manager.rs
-//
-// This file contains RIB and FIB management functionality.
-
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;

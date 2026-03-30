@@ -1,7 +1,3 @@
-// File: src/speaker/connection.rs
-//
-// This file handles connection-related functionality.
-
 use anyhow::{Context, Result};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,12 +21,10 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
                 if let Ok(neighbor) = n.try_lock() {
                     neighbor.remote_ip == Some(remote_ip)
                 } else {
-                    // If we can't get the lock, skip this neighbor
-                    // (it might be in use by another connection attempt)
                     false
                 }
             })
-            .cloned() // Clone the Arc<Mutex<BGPNeighbor>>
+            .cloned()
     };
 
     match matched_neighbor {
@@ -64,7 +58,8 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
             if should_accept {
                 {
                     let mut n = existing_neighbor.lock().await;
-                    let local_addr = socket.local_addr()
+                    let local_addr = socket
+                        .local_addr()
                         .expect("BUG: Socket should have a local address after accept");
                     n.local_ip = Some(local_addr.ip());
                     n.local_port = Some(local_addr.port());
@@ -90,14 +85,7 @@ pub async fn add_incoming(speaker: Arc<Mutex<BGPSpeaker>>, socket: TcpStream, ad
                 remote_ip,
                 remote_port
             );
-
-            // Optionally, you could send a NOTIFICATION message before closing
-            // For now, just close the connection
             drop(socket);
-
-            // Alternative: If you want to support dynamic neighbors, you could create
-            // a new neighbor entry here, but that's generally not recommended for
-            // security reasons in production BGP implementations
         }
     }
 }
@@ -119,7 +107,7 @@ pub async fn listen(speaker: Arc<Mutex<BGPSpeaker>>) -> Result<()> {
         let (socket, addr) = listener
             .accept()
             .await
-            .context(format!("Failed to accept BGP connection"))?;
+            .context("Failed to accept BGP connection".to_string())?;
         add_incoming(speaker.clone(), socket, addr).await;
     }
 }
@@ -134,9 +122,3 @@ pub async fn connect_mgr(speaker: Arc<Mutex<BGPSpeaker>>) {
         tokio::spawn(async move { neighbor::connect(speaker, neighbor).await });
     }
 }
-
-// Connect to a BGP neighbor.
-// pub async fn connect(speaker: Arc<Mutex<BGPSpeaker>>, neighbor: Arc<Mutex<neighbor::BGPNeighbor>>) {
-//     // Delegating to the neighbor module's connect function
-//     neighbor::connect(speaker, neighbor).await;
-// }

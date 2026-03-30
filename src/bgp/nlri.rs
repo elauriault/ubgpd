@@ -85,10 +85,10 @@ impl TryFrom<Ipv4Octets> for Nlri {
         addr.resize(4, 0);
         let net = Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), plen)
             .map_err(|e| BgpError::Message(format!("Invalid IPv4 network: {}", e)))?;
-        Ok(NlriBuilder::default()
+        NlriBuilder::default()
             .net(net)
             .build()
-            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
+            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))
     }
 }
 
@@ -132,10 +132,10 @@ impl TryFrom<Ipv6Octets> for Nlri {
             plen,
         )
         .map_err(|e| BgpError::Message(format!("Invalid IPv6 network: {}", e)))?;
-        Ok(NlriBuilder::default()
+        NlriBuilder::default()
             .net(net)
             .build()
-            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))?)
+            .map_err(|e| BgpError::Message(format!("Failed to build NLRI: {}", e)))
     }
 }
 
@@ -404,4 +404,3 @@ impl From<Mpunlri> for Vec<u8> {
         buf.into_inner()
     }
 }
-

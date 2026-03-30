@@ -54,7 +54,7 @@ pub async fn send_update(
                 if !route_attributes.is_from_neighbor(router_id) {
                     updates
                         .entry(route_attributes.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(n);
                 }
             }
@@ -83,11 +83,7 @@ pub async fn send_update(
                 ra.next_hop = local_ip;
                 ra.prepend(local_asn, 1);
                 true
-            } else if ra.is_from_ibgp() {
-                false
-            } else {
-                true
-            }
+            } else { !ra.is_from_ibgp() }
         };
 
         if !should_send {

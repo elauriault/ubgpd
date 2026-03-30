@@ -1,5 +1,3 @@
-// src/neighbor/capabilities.rs
-
 use crate::bgp;
 use itertools::Itertools;
 use num_traits::FromPrimitive;
