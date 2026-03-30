@@ -1,5 +1,3 @@
-// src/neighbor/timers.rs
-
 use super::session::BGPNeighbor;
 use super::types::Event;
 use anyhow::{anyhow, Context, Result};

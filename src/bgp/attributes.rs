@@ -449,4 +449,3 @@ impl From<PathAttribute> for Vec<u8> {
         buf
     }
 }
-

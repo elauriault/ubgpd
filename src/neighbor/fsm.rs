@@ -1,5 +1,3 @@
-// src/neighbor/fsm.rs
-
 use super::connection;
 use super::message_handler;
 use super::session::BGPNeighbor;
@@ -22,16 +20,18 @@ pub(super) fn calculate_retry_delay(
 ) -> u64 {
     let base_delay = if exponential_backoff {
         let multiplier = 2_u64.pow(retry_counter.min(10) as u32);
-        (base_retry_time as u64).saturating_mul(multiplier).min(3600)
+        (base_retry_time as u64)
+            .saturating_mul(multiplier)
+            .min(3600)
     } else {
         base_retry_time as u64
     };
-    
+
     // Add 10% jitter to prevent thundering herd
     let jitter_range = base_delay / 10;
     let jitter = fastrand::u64(0..=jitter_range);
     let total_delay = base_delay + jitter;
-    
+
     // Ensure we never exceed 3600 seconds (1 hour) for exponential backoff
     if exponential_backoff {
         total_delay.min(3600)
@@ -81,30 +81,30 @@ pub async fn connect(
         Ok(sock) => sock,
         Err(e) => {
             log::error!("Failed to connect to {}: {}", remote_addr, e);
-            
+
             let (should_retry, retry_delay) = {
                 let mut n = neighbor.lock().await;
                 n.attributes.state = BGPState::Idle;
                 n.attributes.connect_retry_counter += 1;
-                
+
                 let should_retry = match n.max_retry_count {
                     Some(max) => n.attributes.connect_retry_counter < max as usize,
                     None => true,
                 };
-                
+
                 let delay = calculate_retry_delay(
                     n.attributes.connect_retry_time,
                     n.attributes.connect_retry_counter,
                     n.exponential_backoff,
                 );
-                
+
                 (should_retry, delay)
             };
-            
+
             if should_retry {
                 tokio::time::sleep(Duration::from_secs(retry_delay)).await;
             }
-            
+
             return Err(anyhow!("Connection failed: {}", e));
         }
     };
@@ -314,11 +314,13 @@ pub async fn process_event_connect(
 ) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await
+            connection::send_keepalive(server)
+                .await
                 .context("Failed to send keepalive in CONNECT state")?;
         }
         Event::ManualStart => {
-            connection::send_keepalive(server).await
+            connection::send_keepalive(server)
+                .await
                 .context("Failed to send keepalive on manual start")?;
         }
         Event::AutomaticStart => {
@@ -450,7 +452,8 @@ pub async fn process_event_openconfirm(
 ) -> Result<()> {
     match e {
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await
+            connection::send_keepalive(server)
+                .await
                 .context("Failed to send keepalive in OPENCONFIRM state")?;
         }
         Event::TcpConnectionFails => {
@@ -510,7 +513,8 @@ pub async fn process_event_established(
             log::info!("FSM ESTABLISHED: {:?} to be implemented", e);
         }
         Event::KeepaliveTimerExpires => {
-            connection::send_keepalive(server).await
+            connection::send_keepalive(server)
+                .await
                 .context("Failed to send keepalive in ESTABLISHED state")?;
         }
         Event::RibUpdate(nlris) => {
@@ -522,4 +526,3 @@ pub async fn process_event_established(
     }
     Ok(())
 }
-
