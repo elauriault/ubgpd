@@ -17,7 +17,7 @@ fn test_address_family_valid() {
         afi: Afi::Ipv4,
         safi: Safi::NLRIUnicast,
     };
-    
+
     assert_eq!(af.afi, Afi::Ipv4);
     assert_eq!(af.safi, Safi::NLRIUnicast);
 }
@@ -28,17 +28,17 @@ fn test_address_family_equality_valid() {
         afi: Afi::Ipv4,
         safi: Safi::NLRIUnicast,
     };
-    
+
     let af2 = AddressFamily {
         afi: Afi::Ipv4,
         safi: Safi::NLRIUnicast,
     };
-    
+
     let af3 = AddressFamily {
         afi: Afi::Ipv6,
         safi: Safi::NLRIUnicast,
     };
-    
+
     assert_eq!(af1, af2);
     assert_ne!(af1, af3);
 }
@@ -46,26 +46,26 @@ fn test_address_family_equality_valid() {
 #[test]
 fn test_address_family_hash_valid() {
     let mut set = HashSet::new();
-    
+
     let af1 = AddressFamily {
         afi: Afi::Ipv4,
         safi: Safi::NLRIUnicast,
     };
-    
+
     let af2 = AddressFamily {
         afi: Afi::Ipv4,
         safi: Safi::NLRIUnicast,
     };
-    
+
     let af3 = AddressFamily {
         afi: Afi::Ipv6,
         safi: Safi::NLRIUnicast,
     };
-    
+
     set.insert(af1);
     assert!(!set.insert(af2)); // Should return false (duplicate)
     assert!(set.insert(af3)); // Should return true (new)
-    
+
     assert_eq!(set.len(), 2);
 }
 
@@ -125,7 +125,6 @@ fn test_update_subcode_values_valid() {
     assert_eq!(UpdateSubCode::MalformedASPATH as u8, 11);
 }
 
-
 #[test]
 fn test_validate_message_length_valid() {
     assert!(validate_message_length(MIN_MESSAGE_LENGTH).is_ok());
@@ -171,7 +170,7 @@ fn test_validate_nlri_prefix_length_valid() {
     assert!(prefix_bytes(0, &Afi::Ipv4).is_ok());
     assert!(prefix_bytes(24, &Afi::Ipv4).is_ok());
     assert!(prefix_bytes(32, &Afi::Ipv4).is_ok());
-    
+
     assert!(prefix_bytes(0, &Afi::Ipv6).is_ok());
     assert!(prefix_bytes(64, &Afi::Ipv6).is_ok());
     assert!(prefix_bytes(128, &Afi::Ipv6).is_ok());
@@ -188,13 +187,13 @@ fn test_is_extended_len_valid() {
 #[test]
 fn test_safe_slice_valid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     assert!(safe_slice(&buffer, 0, 3).is_ok());
     assert_eq!(safe_slice(&buffer, 0, 3).unwrap(), &[1, 2, 3]);
-    
+
     assert!(safe_slice(&buffer, 2, 5).is_ok());
     assert_eq!(safe_slice(&buffer, 2, 5).unwrap(), &[3, 4, 5]);
-    
+
     assert!(safe_slice(&buffer, 0, 0).is_ok());
     assert_eq!(safe_slice(&buffer, 0, 0).unwrap(), &[]);
 }
@@ -202,15 +201,15 @@ fn test_safe_slice_valid() {
 #[test]
 fn test_safe_array_valid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     let arr: Result<[u8; 2], _> = safe_array(&buffer, 0);
     assert!(arr.is_ok());
     assert_eq!(arr.unwrap(), [1, 2]);
-    
+
     let arr: Result<[u8; 3], _> = safe_array(&buffer, 2);
     assert!(arr.is_ok());
     assert_eq!(arr.unwrap(), [3, 4, 5]);
-    
+
     let arr: Result<[u8; 0], _> = safe_array(&buffer, 0);
     assert!(arr.is_ok());
     assert_eq!(arr.unwrap(), []);
@@ -219,7 +218,7 @@ fn test_safe_array_valid() {
 #[test]
 fn test_validate_buffer_bounds_valid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     assert!(validate_buffer_bounds(&buffer, 0, 5).is_ok());
     assert!(validate_buffer_bounds(&buffer, 2, 3).is_ok());
     assert!(validate_buffer_bounds(&buffer, 0, 0).is_ok());
@@ -230,10 +229,10 @@ fn test_validate_buffer_bounds_valid() {
 fn test_enum_from_primitive_valid() {
     assert_eq!(Afi::from_u16(1), Some(Afi::Ipv4));
     assert_eq!(Afi::from_u16(2), Some(Afi::Ipv6));
-    
+
     assert_eq!(Safi::from_u8(1), Some(Safi::NLRIUnicast));
     assert_eq!(Safi::from_u8(2), Some(Safi::NLRIMulticast));
-    
+
     assert_eq!(MessageType::from_u8(1), Some(MessageType::Open));
     assert_eq!(MessageType::from_u8(2), Some(MessageType::Update));
     assert_eq!(MessageType::from_u8(3), Some(MessageType::Notification));
@@ -242,12 +241,15 @@ fn test_enum_from_primitive_valid() {
 
 #[test]
 fn test_bgp_validation_error_display_valid() {
-    let err = BgpValidationError::MessageTooShort { actual: 10, minimum: 19 };
+    let err = BgpValidationError::MessageTooShort {
+        actual: 10,
+        minimum: 19,
+    };
     let display = format!("{}", err);
     assert!(display.contains("Message too short"));
     assert!(display.contains("10"));
     assert!(display.contains("19"));
-    
+
     let err = BgpValidationError::InvalidMarker;
     let display = format!("{}", err);
     assert!(display.contains("Invalid marker"));
@@ -259,12 +261,12 @@ fn test_bgp_validation_error_to_notification_codes_valid() {
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::MessageHeader);
     assert_eq!(subcode, HeaderSubCode::ConnectionNotSynchronized as u8);
-    
+
     let err = BgpValidationError::InvalidAsn(0);
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::OpenMessage);
     assert_eq!(subcode, OpenSubCode::BadPeerAS as u8);
-    
+
     let err = BgpValidationError::MalformedAsPath("test".to_string());
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::UpdateMessage);
@@ -276,7 +278,7 @@ fn test_bgp_validation_error_to_notification_codes_valid() {
 fn test_validate_message_length_invalid() {
     assert!(validate_message_length(18).is_err()); // Too short
     assert!(validate_message_length(4097).is_err()); // Too long
-    
+
     let err = validate_message_length(10).unwrap_err();
     match err {
         BgpValidationError::MessageTooShort { actual, minimum } => {
@@ -291,9 +293,9 @@ fn test_validate_message_length_invalid() {
 fn test_validate_marker_invalid() {
     let mut bad_marker = MARKER;
     bad_marker[0] = 0xfe;
-    
+
     assert!(validate_marker(&bad_marker).is_err());
-    
+
     let err = validate_marker(&bad_marker).unwrap_err();
     match err {
         BgpValidationError::InvalidMarker => {} // Expected
@@ -305,7 +307,7 @@ fn test_validate_marker_invalid() {
 fn test_validate_bgp_version_invalid() {
     assert!(validate_bgp_version(3).is_err());
     assert!(validate_bgp_version(5).is_err());
-    
+
     let err = validate_bgp_version(3).unwrap_err();
     match err {
         BgpValidationError::InvalidVersion { actual, expected } => {
@@ -319,7 +321,7 @@ fn test_validate_bgp_version_invalid() {
 #[test]
 fn test_validate_asn_invalid() {
     assert!(validate_asn(0).is_err());
-    
+
     let err = validate_asn(0).unwrap_err();
     match err {
         BgpValidationError::InvalidAsn(asn) => {
@@ -333,7 +335,7 @@ fn test_validate_asn_invalid() {
 fn test_validate_hold_time_invalid() {
     assert!(validate_hold_time(1).is_err());
     assert!(validate_hold_time(2).is_err());
-    
+
     let err = validate_hold_time(1).unwrap_err();
     match err {
         BgpValidationError::InvalidHoldTime(hold_time) => {
@@ -346,7 +348,7 @@ fn test_validate_hold_time_invalid() {
 #[test]
 fn test_validate_router_id_invalid() {
     assert!(validate_router_id(0).is_err());
-    
+
     let err = validate_router_id(0).unwrap_err();
     match err {
         BgpValidationError::InvalidRouterId(router_id) => {
@@ -360,7 +362,7 @@ fn test_validate_router_id_invalid() {
 fn test_validate_nlri_prefix_length_invalid() {
     assert!(prefix_bytes(33, &Afi::Ipv4).is_err());
     assert!(prefix_bytes(129, &Afi::Ipv6).is_err());
-    
+
     let err = prefix_bytes(33, &Afi::Ipv4).unwrap_err();
     match err {
         BgpValidationError::InvalidNlriPrefixLength(prefix_len) => {
@@ -373,14 +375,18 @@ fn test_validate_nlri_prefix_length_invalid() {
 #[test]
 fn test_safe_slice_invalid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     assert!(safe_slice(&buffer, 0, 6).is_err()); // End beyond buffer
     assert!(safe_slice(&buffer, 3, 2).is_err()); // Start > end
     assert!(safe_slice(&buffer, 6, 7).is_err()); // Start beyond buffer
-    
+
     let err = safe_slice(&buffer, 0, 6).unwrap_err();
     match err {
-        BgpValidationError::InvalidBufferBounds { offset, length: _, buffer_size } => {
+        BgpValidationError::InvalidBufferBounds {
+            offset,
+            length: _,
+            buffer_size,
+        } => {
             assert_eq!(offset, 0);
             assert_eq!(buffer_size, 5);
         }
@@ -391,16 +397,20 @@ fn test_safe_slice_invalid() {
 #[test]
 fn test_safe_array_invalid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     let arr: Result<[u8; 6], _> = safe_array(&buffer, 0);
     assert!(arr.is_err()); // Not enough bytes
-    
+
     let arr: Result<[u8; 3], _> = safe_array(&buffer, 3);
     assert!(arr.is_err()); // Not enough bytes from offset 3
-    
+
     let err: BgpValidationError = safe_array::<3>(&buffer, 3).unwrap_err();
     match err {
-        BgpValidationError::InvalidBufferBounds { offset, length, buffer_size } => {
+        BgpValidationError::InvalidBufferBounds {
+            offset,
+            length,
+            buffer_size,
+        } => {
             assert_eq!(offset, 3);
             assert_eq!(length, 3);
             assert_eq!(buffer_size, 5);
@@ -412,14 +422,18 @@ fn test_safe_array_invalid() {
 #[test]
 fn test_validate_buffer_bounds_invalid() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     assert!(validate_buffer_bounds(&buffer, 0, 6).is_err());
     assert!(validate_buffer_bounds(&buffer, 5, 1).is_err());
     assert!(validate_buffer_bounds(&buffer, 6, 0).is_err());
-    
+
     let err = validate_buffer_bounds(&buffer, 0, 6).unwrap_err();
     match err {
-        BgpValidationError::InvalidBufferBounds { offset, length, buffer_size } => {
+        BgpValidationError::InvalidBufferBounds {
+            offset,
+            length,
+            buffer_size,
+        } => {
             assert_eq!(offset, 0);
             assert_eq!(length, 6);
             assert_eq!(buffer_size, 5);
@@ -433,11 +447,11 @@ fn test_enum_from_primitive_invalid() {
     assert_eq!(Afi::from_u16(0), None);
     assert_eq!(Afi::from_u16(3), None);
     assert_eq!(Afi::from_u16(65535), None);
-    
+
     assert_eq!(Safi::from_u8(0), None);
     assert_eq!(Safi::from_u8(3), None);
     assert_eq!(Safi::from_u8(255), None);
-    
+
     assert_eq!(MessageType::from_u8(0), None);
     assert_eq!(MessageType::from_u8(5), None);
     assert_eq!(MessageType::from_u8(255), None);
@@ -470,7 +484,7 @@ fn test_address_family_all_combinations() {
         (Afi::Ipv6, Safi::NLRIUnicast),
         (Afi::Ipv6, Safi::NLRIMulticast),
     ];
-    
+
     for (afi, safi) in combinations {
         let af = AddressFamily { afi, safi };
         assert_eq!(af.afi, afi);
@@ -492,15 +506,15 @@ fn test_is_extended_len_edge_cases() {
 #[test]
 fn test_safe_slice_edge_cases() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     // Test empty slice
     assert!(safe_slice(&buffer, 0, 0).is_ok());
     assert_eq!(safe_slice(&buffer, 0, 0).unwrap(), &[]);
-    
+
     // Test slice at end
     assert!(safe_slice(&buffer, 5, 5).is_ok());
     assert_eq!(safe_slice(&buffer, 5, 5).unwrap(), &[]);
-    
+
     // Test full buffer
     assert!(safe_slice(&buffer, 0, 5).is_ok());
     assert_eq!(safe_slice(&buffer, 0, 5).unwrap(), &[1, 2, 3, 4, 5]);
@@ -509,17 +523,17 @@ fn test_safe_slice_edge_cases() {
 #[test]
 fn test_safe_array_edge_cases() {
     let buffer = vec![1, 2, 3, 4, 5];
-    
+
     // Test zero-length array
     let arr: Result<[u8; 0], _> = safe_array(&buffer, 0);
     assert!(arr.is_ok());
     assert_eq!(arr.unwrap(), []);
-    
+
     // Test array at end of buffer
     let arr: Result<[u8; 0], _> = safe_array(&buffer, 5);
     assert!(arr.is_ok());
     assert_eq!(arr.unwrap(), []);
-    
+
     // Test maximum length array
     let arr: Result<[u8; 5], _> = safe_array(&buffer, 0);
     assert!(arr.is_ok());
@@ -529,31 +543,47 @@ fn test_safe_array_edge_cases() {
 #[test]
 fn test_bgp_validation_error_comprehensive_coverage() {
     let errors = vec![
-        BgpValidationError::MessageTooShort { actual: 10, minimum: 19 },
-        BgpValidationError::MessageTooLong { actual: 5000, maximum: 4096 },
+        BgpValidationError::MessageTooShort {
+            actual: 10,
+            minimum: 19,
+        },
+        BgpValidationError::MessageTooLong {
+            actual: 5000,
+            maximum: 4096,
+        },
         BgpValidationError::InvalidMarker,
         BgpValidationError::InvalidMessageType(99),
-        BgpValidationError::InvalidVersion { actual: 3, expected: 4 },
+        BgpValidationError::InvalidVersion {
+            actual: 3,
+            expected: 4,
+        },
         BgpValidationError::InvalidAsn(0),
         BgpValidationError::InvalidHoldTime(1),
         BgpValidationError::InvalidRouterId(0),
         BgpValidationError::InvalidOptionalParameterLength(255),
         BgpValidationError::InvalidPathAttributeLength(65536),
         BgpValidationError::InvalidNlriPrefixLength(33),
-        BgpValidationError::InvalidBufferBounds { offset: 0, length: 10, buffer_size: 5 },
+        BgpValidationError::InvalidBufferBounds {
+            offset: 0,
+            length: 10,
+            buffer_size: 5,
+        },
         BgpValidationError::MissingRequiredAttribute("ORIGIN".to_string()),
         BgpValidationError::MalformedAsPath("test".to_string()),
         BgpValidationError::InvalidNextHop("0.0.0.0".to_string()),
         BgpValidationError::InvalidCapability("unknown".to_string()),
     ];
-    
+
     for err in errors {
         let (code, subcode) = err.to_notification_codes();
-        
+
         // Verify that all errors map to valid error codes
-        assert!(matches!(code, ErrorCode::MessageHeader | ErrorCode::OpenMessage | ErrorCode::UpdateMessage));
+        assert!(matches!(
+            code,
+            ErrorCode::MessageHeader | ErrorCode::OpenMessage | ErrorCode::UpdateMessage
+        ));
         assert!(subcode > 0 && subcode <= 11); // Valid subcodes range from 1-11
-        
+
         // Verify that error displays work
         let display = format!("{}", err);
         assert!(!display.is_empty());
@@ -649,12 +679,12 @@ fn test_error_to_notification_codes() {
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::MessageHeader);
     assert_eq!(subcode, HeaderSubCode::ConnectionNotSynchronized as u8);
-    
+
     let err = BgpValidationError::InvalidAsn(0);
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::OpenMessage);
     assert_eq!(subcode, OpenSubCode::BadPeerAS as u8);
-    
+
     let err = BgpValidationError::MalformedAsPath("test".to_string());
     let (code, subcode) = err.to_notification_codes();
     assert_eq!(code, ErrorCode::UpdateMessage);
@@ -677,7 +707,7 @@ fn test_address_family_hash() {
         afi: Afi::Ipv6,
         safi: Safi::NLRIUnicast,
     };
-    
+
     set.insert(af1.clone());
     assert!(!set.insert(af2)); // Should return false (already exists)
     assert!(set.insert(af3)); // Should return true (new)
@@ -693,15 +723,15 @@ fn test_message_type_default() {
 #[test]
 fn test_enum_from_primitive() {
     use num_traits::FromPrimitive;
-    
+
     assert_eq!(Afi::from_u16(1), Some(Afi::Ipv4));
     assert_eq!(Afi::from_u16(2), Some(Afi::Ipv6));
     assert_eq!(Afi::from_u16(3), None);
-    
+
     assert_eq!(Safi::from_u8(1), Some(Safi::NLRIUnicast));
     assert_eq!(Safi::from_u8(2), Some(Safi::NLRIMulticast));
     assert_eq!(Safi::from_u8(3), None);
-    
+
     assert_eq!(MessageType::from_u8(1), Some(MessageType::Open));
     assert_eq!(MessageType::from_u8(2), Some(MessageType::Update));
     assert_eq!(MessageType::from_u8(3), Some(MessageType::Notification));
